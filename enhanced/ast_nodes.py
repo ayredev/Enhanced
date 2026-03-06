@@ -181,3 +181,118 @@ class LinearUse(ASTNode):
 class LinearConsume(ASTNode):
     def __init__(self, name):
         self.name = name
+
+# Phase v2 — Custom Types, Generics, Methods, Maps, Optionals, Enums
+
+class StructDef(ASTNode):
+    def __init__(self, name, fields):
+        self.name = name           # string
+        self.fields = fields       # list of FieldDef
+
+class FieldDef(ASTNode):
+    def __init__(self, name, field_type):
+        self.name = name           # string
+        self.field_type = field_type  # string: 'int', 'str', 'bool', or struct name
+
+class StructInit(ASTNode):
+    def __init__(self, struct_type, name):
+        self.struct_type = struct_type  # string
+        self.name = name               # string
+
+class FieldSet(ASTNode):
+    def __init__(self, object_name, field_path, value):
+        self.object_name = object_name  # string
+        self.field_path = field_path    # list of strings e.g. ['name'] or ['profile','name']
+        self.value = value              # ASTNode
+
+class FieldGet(ASTNode):
+    def __init__(self, object_name, field_path):
+        self.object_name = object_name
+        self.field_path = field_path    # list of strings
+
+class MethodDef(ASTNode):
+    def __init__(self, target_type, name, params, return_type, body):
+        self.target_type = target_type  # string — struct type name
+        self.name = name                # string — method name
+        self.params = params            # list of param info
+        self.return_type = return_type  # string or None
+        self.body = body                # list of ASTNode
+
+class MethodCall(ASTNode):
+    def __init__(self, object_name, method_name, args):
+        self.object_name = object_name
+        self.method_name = method_name
+        self.args = args                # list of ASTNode
+
+class Return(ASTNode):
+    def __init__(self, value):
+        self.value = value
+
+class MapDecl(ASTNode):
+    def __init__(self, name, key_type=None, value_type=None):
+        self.name = name
+        self.key_type = key_type
+        self.value_type_decl = value_type
+
+class MapSet(ASTNode):
+    def __init__(self, map_name, key, value):
+        self.map_name = map_name
+        self.key = key
+        self.value = value
+
+class MapGet(ASTNode):
+    def __init__(self, map_name, key):
+        self.map_name = map_name
+        self.key = key
+
+class MapContains(ASTNode):
+    def __init__(self, map_name, key):
+        self.map_name = map_name
+        self.key = key
+
+class MapRemove(ASTNode):
+    def __init__(self, map_name, key):
+        self.map_name = map_name
+        self.key = key
+
+class MapSize(ASTNode):
+    def __init__(self, map_name):
+        self.map_name = map_name
+
+class OptionalDecl(ASTNode):
+    def __init__(self, name, inner_type, value=None):
+        self.name = name
+        self.inner_type = inner_type
+        self.value = value
+
+class OptionalCheck(ASTNode):
+    def __init__(self, name):
+        self.name = name
+
+class OptionalUnwrap(ASTNode):
+    def __init__(self, name):
+        self.name = name
+
+class EnumDef(ASTNode):
+    def __init__(self, name, variants):
+        self.name = name
+        self.variants = variants  # list of strings
+
+class EnumValue(ASTNode):
+    def __init__(self, enum_type, variant):
+        self.enum_type = enum_type
+        self.variant = variant
+
+class EnumCheck(ASTNode):
+    def __init__(self, variable, variant):
+        self.variable = variable
+        self.variant = variant
+
+class LiteralBool(ASTNode):
+    def __init__(self, value):
+        self.value = value  # True or False
+
+class OtherwiseBlock(ASTNode):
+    def __init__(self, body):
+        self.body = body
+

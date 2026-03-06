@@ -1,0 +1,10 @@
+define a direction as one of:
+    north.
+    south.
+    east.
+    west.
+
+the direction heading is north.
+
+if heading is north:
+    say "Going north".

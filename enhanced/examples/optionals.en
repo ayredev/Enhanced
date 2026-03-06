@@ -1,0 +1,11 @@
+the optional text called nickname is nothing.
+
+if nickname has a value:
+    say nickname's value.
+otherwise:
+    say "No nickname set".
+
+set nickname to "Ace".
+
+if nickname has a value:
+    say nickname's value.

@@ -1,0 +1,6 @@
+create a map of texts to numbers called scores.
+set scores["Alice"] to 95.
+set scores["Bob"] to 87.
+set scores["Carol"] to 92.
+say scores["Alice"].
+say the size of scores.

@@ -1,6 +1,8 @@
 from ast_nodes import *
 from symbol_table import SymbolTable, SymbolTableError
 from type_system import TypeSystem, TypeError
+from etypes.struct_types import StructRegistry
+from etypes.enum_types import EnumRegistry
 
 class SemanticError(Exception):
     pass
@@ -8,6 +10,9 @@ class SemanticError(Exception):
 class SemanticAnalyzer:
     def __init__(self):
         self.symtab = SymbolTable()
+        self.struct_registry = StructRegistry()
+        self.enum_registry = EnumRegistry()
+        self.methods = {}  # "type.method_name" -> MethodDef node
 
     def analyze(self, ast):
         self.visit(ast)
@@ -92,7 +97,11 @@ class SemanticAnalyzer:
             self.symtab.define(node.name.name, TypeSystem.LIST, node.line)
             # Store element type directly on the symbol node reference for mutability during append
             sym = self.symtab.lookup(node.name.name, node.line)
-            sym['element_type'] = None
+            # Use typed element_type from parser if available (v2: 'create a list of X')
+            if hasattr(node, 'element_type') and node.element_type:
+                sym['element_type'] = node.element_type
+            else:
+                sym['element_type'] = None
             
             node.value_type = TypeSystem.LIST
         except SymbolTableError as e:
@@ -179,8 +188,8 @@ class SemanticAnalyzer:
 
     def visit_ListSize(self, node):
         list_type = self.visit(node.list_name)
-        if list_type != TypeSystem.LIST:
-            raise SemanticError(f"I found a problem on line {node.line}: size requires a list.")
+        if list_type not in (TypeSystem.LIST, TypeSystem.MAP):
+            raise SemanticError(f"I found a problem on line {node.line}: size requires a list or map.")
         node.value_type = TypeSystem.INT
         return TypeSystem.INT
 
@@ -205,8 +214,8 @@ class SemanticAnalyzer:
     def visit_ListContains(self, node):
         list_type = self.visit(node.list_name)
         self.visit(node.value)
-        if list_type != TypeSystem.LIST:
-            raise SemanticError(f"I found a problem on line {node.line}: check if in requires a list.")
+        if list_type not in (TypeSystem.LIST, TypeSystem.MAP):
+            raise SemanticError(f"I found a problem on line {node.line}: check if in requires a list or map.")
         node.value_type = TypeSystem.BOOL
         return TypeSystem.BOOL
 
@@ -290,3 +299,208 @@ class SemanticAnalyzer:
         except SymbolTableError as e:
             raise SemanticError(str(e))
 
+    # Phase v2 — Custom Types, Generics, Methods, Maps, Optionals, Enums
+
+    def visit_StructDef(self, node):
+        """Register a struct type definition."""
+        fields = [(f.name, f.field_type) for f in node.fields]
+        err = self.struct_registry.define(node.name, fields)
+        if err:
+            raise SemanticError(f"I found a problem on line {node.line}: {err}")
+
+    def visit_StructInit(self, node):
+        """Create instance of a struct type."""
+        defn = self.struct_registry.lookup(node.struct_type)
+        if not defn:
+            raise SemanticError(
+                f"I found a problem on line {node.line}: '{node.struct_type}' hasn't been defined as a type. "
+                f"Define it first with 'define a {node.struct_type} as:'")
+        self.symtab.define(node.name, node.struct_type, node.line)
+        node.value_type = node.struct_type
+        return node.struct_type
+
+    def visit_FieldSet(self, node):
+        """Set a field on a struct instance."""
+        try:
+            sym = self.symtab.lookup(node.object_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        obj_type = sym['type']
+        resolved_type, err = self.struct_registry.resolve_field_path(obj_type, node.field_path)
+        if err:
+            raise SemanticError(f"I found a problem on line {node.line}: {err}")
+        val_type = self.visit(node.value)
+        if resolved_type in ('int', 'str', 'bool') and val_type != resolved_type:
+            raise SemanticError(
+                f"I found a problem on line {node.line}: The field '{node.field_path[-1]}' expects "
+                f"{TypeSystem.noun_for_type(resolved_type)}, but you gave {TypeSystem.noun_for_type(val_type)}.")
+
+    def visit_FieldGet(self, node):
+        """Get a field from a struct instance."""
+        try:
+            sym = self.symtab.lookup(node.object_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        obj_type = sym['type']
+        resolved_type, err = self.struct_registry.resolve_field_path(obj_type, node.field_path)
+        if err:
+            raise SemanticError(f"I found a problem on line {node.line}: {err}")
+        node.value_type = resolved_type
+        return resolved_type
+
+    def visit_MethodDef(self, node):
+        """Register a method definition."""
+        method_key = f"{node.target_type}.{node.name}"
+        self.methods[method_key] = node
+        # Analyze body with parameter scope
+        self.symtab.enter_scope()
+        try:
+            self.symtab.define(node.target_type, node.target_type, node.line)
+            for stmt in node.body:
+                self.visit(stmt)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        finally:
+            self.symtab.exit_scope()
+
+    def visit_MethodCall(self, node):
+        try:
+            sym = self.symtab.lookup(node.object_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        method_key = f"{sym['type']}.{node.method_name}"
+        if method_key not in self.methods:
+            raise SemanticError(
+                f"I found a problem on line {node.line}: There's no method '{node.method_name}' "
+                f"defined for type '{sym['type']}'.")
+        for arg in node.args:
+            self.visit(arg)
+        node.value_type = TypeSystem.INT
+        return TypeSystem.INT
+
+    def visit_Return(self, node):
+        if node.value:
+            val_type = self.visit(node.value)
+            node.value_type = val_type
+            return val_type
+
+    def visit_MapDecl(self, node):
+        self.symtab.define(node.name, TypeSystem.MAP, node.line)
+        sym = self.symtab.lookup(node.name, node.line)
+        sym['key_type'] = node.key_type
+        sym['value_type'] = node.value_type_decl
+        node.value_type = TypeSystem.MAP
+        return TypeSystem.MAP
+
+    def visit_MapSet(self, node):
+        try:
+            sym = self.symtab.lookup(node.map_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        if sym['type'] != TypeSystem.MAP:
+            raise SemanticError(f"I found a problem on line {node.line}: '{node.map_name}' is not a map.")
+        key_type = self.visit(node.key)
+        val_type = self.visit(node.value)
+        if sym.get('key_type') and key_type != sym['key_type']:
+            raise SemanticError(
+                f"I found a problem on line {node.line}: '{node.map_name}' uses "
+                f"{TypeSystem.noun_for_type(sym['key_type'])} keys, not {TypeSystem.noun_for_type(key_type)}.")
+        if sym.get('value_type') and val_type != sym['value_type']:
+            raise SemanticError(
+                f"I found a problem on line {node.line}: '{node.map_name}' stores "
+                f"{TypeSystem.noun_for_type(sym['value_type'])} values, not {TypeSystem.noun_for_type(val_type)}.")
+
+    def visit_MapGet(self, node):
+        try:
+            sym = self.symtab.lookup(node.map_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        self.visit(node.key)
+        result_type = sym.get('value_type') or TypeSystem.STR
+        node.value_type = result_type
+        return result_type
+
+    def visit_MapContains(self, node):
+        try:
+            self.symtab.lookup(node.map_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        self.visit(node.key)
+        node.value_type = TypeSystem.BOOL
+        self.symtab.define("result", TypeSystem.BOOL, node.line)
+        return TypeSystem.BOOL
+
+    def visit_MapRemove(self, node):
+        try:
+            self.symtab.lookup(node.map_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        self.visit(node.key)
+
+    def visit_MapSize(self, node):
+        try:
+            self.symtab.lookup(node.map_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        node.value_type = TypeSystem.INT
+        return TypeSystem.INT
+
+    def visit_EnumDef(self, node):
+        err = self.enum_registry.define(node.name, node.variants)
+        if err:
+            raise SemanticError(f"I found a problem on line {node.line}: {err}")
+
+    def visit_EnumValue(self, node):
+        if not self.enum_registry.has_variant(node.enum_type, node.variant):
+            variants = self.enum_registry.lookup(node.enum_type)
+            if not variants:
+                raise SemanticError(
+                    f"I found a problem on line {node.line}: '{node.enum_type}' hasn't been defined as an enum.")
+            raise SemanticError(
+                f"I found a problem on line {node.line}: '{node.variant}' is not a valid option for "
+                f"'{node.enum_type}'. Valid options are: {', '.join(variants)}.")
+        node.value_type = node.enum_type
+        return node.enum_type
+
+    def visit_EnumCheck(self, node):
+        node.value_type = TypeSystem.BOOL
+        return TypeSystem.BOOL
+
+    def visit_OptionalDecl(self, node):
+        self.symtab.define(node.name, TypeSystem.OPTIONAL, node.line)
+        sym = self.symtab.lookup(node.name, node.line)
+        sym['inner_type'] = node.inner_type
+        sym['has_value'] = node.value is not None and not (hasattr(node.value, 'value') and node.value.value is None)
+        if node.value:
+            self.visit(node.value)
+        node.value_type = TypeSystem.OPTIONAL
+        return TypeSystem.OPTIONAL
+
+    def visit_OptionalCheck(self, node):
+        try:
+            self.symtab.lookup(node.name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        node.value_type = TypeSystem.BOOL
+        return TypeSystem.BOOL
+
+    def visit_OptionalUnwrap(self, node):
+        try:
+            sym = self.symtab.lookup(node.name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        inner = sym.get('inner_type', TypeSystem.STR)
+        node.value_type = inner
+        return inner
+
+    def visit_LiteralBool(self, node):
+        node.value_type = TypeSystem.BOOL
+        return TypeSystem.BOOL
+
+    def visit_OtherwiseBlock(self, node):
+        self.symtab.enter_scope()
+        try:
+            for stmt in node.body:
+                self.visit(stmt)
+        finally:
+            self.symtab.exit_scope()

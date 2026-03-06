@@ -13,10 +13,10 @@ class Token:
         return self.type == other.type and self.value == other.value
 
 class Lexer:
-    KEYWORDS = {"a", "an", "the", "for", "each", "in", "if", "greater", "than", "first", "last", "current", "null", "new", "still", "valid", "as"}
+    KEYWORDS = {"a", "an", "the", "for", "each", "in", "if", "greater", "than", "first", "last", "current", "null", "new", "still", "valid", "as", "define", "otherwise", "one", "equal", "or", "not"}
     CONNECTORS = {"and", "then", "with", "to", "from", "of", "by", "through"}
-    VERBS = {"say", "create", "add", "set", "subtract", "is", "called", "read", "write", "append", "multiply", "divide", "divided", "remove", "sort", "wait", "get", "load", "call", "check", "exists", "open", "close", "send", "free"}
-    NOUNS = {"number", "text", "list", "names", "result", "file", "remainder", "absolute", "value", "power", "size", "item", "seconds", "timestamp", "url", "response", "body", "library", "person", "user", "connection"}
+    VERBS = {"say", "create", "add", "set", "subtract", "is", "called", "read", "write", "append", "multiply", "divide", "divided", "remove", "sort", "wait", "get", "load", "call", "check", "exists", "open", "close", "send", "free", "give", "back", "has"}
+    NOUNS = {"number", "text", "list", "names", "result", "file", "remainder", "absolute", "value", "power", "size", "item", "seconds", "timestamp", "url", "response", "body", "library", "person", "user", "connection", "truth", "map", "optional"}
 
     def __init__(self, text):
         self.text = text
@@ -37,8 +37,13 @@ class Lexer:
                 self.pos += 1
                 continue
 
-            if char in {'.', ','}:
+            if char in {'.', ',', ':'}:
                 tokens.append(Token("PUNCTUATION", char, self.line))
+                self.pos += 1
+                continue
+
+            if char in {'[', ']'}:
+                tokens.append(Token("BRACKET", char, self.line))
                 self.pos += 1
                 continue
 
@@ -66,7 +71,37 @@ class Lexer:
                 while self.pos < len(self.text) and (self.text[self.pos].isalnum() or self.text[self.pos] == '_'):
                     self.pos += 1
                 word = self.text[start:self.pos]
-                
+
+                # Handle possessive: alice's -> IDENTIFIER(alice) + POSSESSIVE('s)
+                if self.pos < len(self.text) and self.text[self.pos] == "'":
+                    if self.pos + 1 < len(self.text) and self.text[self.pos+1].lower() == 's':
+                        # Emit the word token first
+                        if word in Lexer.KEYWORDS:
+                            tokens.append(Token("KEYWORD", word, self.line))
+                        elif word in Lexer.CONNECTORS:
+                            tokens.append(Token("CONNECTOR", word, self.line))
+                        elif word in Lexer.VERBS:
+                            tokens.append(Token("VERB", word, self.line))
+                        elif word in Lexer.NOUNS:
+                            tokens.append(Token("NOUN", word, self.line))
+                        else:
+                            tokens.append(Token("IDENTIFIER", word, self.line))
+                        # Emit possessive token
+                        tokens.append(Token("POSSESSIVE", "'s", self.line))
+                        self.pos += 2  # skip 's
+                        continue
+
+                # Boolean literals
+                if word == "true":
+                    tokens.append(Token("LITERAL_BOOL", "true", self.line))
+                    continue
+                if word == "false":
+                    tokens.append(Token("LITERAL_BOOL", "false", self.line))
+                    continue
+                if word == "nothing":
+                    tokens.append(Token("LITERAL_NOTHING", "nothing", self.line))
+                    continue
+
                 if word in Lexer.KEYWORDS:
                     tokens.append(Token("KEYWORD", word, self.line))
                 elif word in Lexer.CONNECTORS:

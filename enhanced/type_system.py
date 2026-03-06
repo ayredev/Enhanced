@@ -7,6 +7,8 @@ class TypeSystem:
     STR = "str"
     BOOL = "bool"
     LIST = "list"
+    MAP = "map"
+    OPTIONAL = "optional"
 
     @classmethod
     def check_binary_op(cls, op, left_type, right_type, line):
@@ -37,6 +39,10 @@ class TypeSystem:
             return "a truth"
         elif type_name == cls.LIST:
             return "a list"
+        elif type_name == cls.MAP:
+            return "a map"
+        elif type_name == cls.OPTIONAL:
+            return "an optional"
         return f"a {type_name}"
         
     @classmethod
@@ -46,6 +52,8 @@ class TypeSystem:
 
     @classmethod
     def check_assignment(cls, expected_type, actual_type, line, name):
+        if expected_type == "any":
+            return  # accept any type
         if expected_type != actual_type:
              raise TypeError(f"I found a problem on line {line}: '{name}' is declared as {cls.noun_for_type(expected_type)}, but you assigned {cls.noun_for_type(actual_type)} to it.")
 
@@ -55,3 +63,4 @@ class TypeSystem:
             raise TypeError(f"I found a problem on line {line}: '{name}' is {cls.noun_for_type(list_type)}, not a list. You can't add to it.")
         if element_type is not None and val_type != element_type:
             raise TypeError(f"I found a problem on line {line}: '{name}' holds {cls.noun_for_type(element_type)}s, but you're trying to add {cls.noun_for_type(val_type)}.")
+

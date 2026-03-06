@@ -1,0 +1,16 @@
+define a product as:
+    a text called name.
+    a number called price.
+    a number called stock.
+
+create a new product called apple.
+set apple's name to "Apple".
+set apple's price to 2.
+set apple's stock to 100.
+
+say apple's name.
+say apple's price.
+
+create a list of products called inventory.
+add apple to inventory.
+say the size of inventory.

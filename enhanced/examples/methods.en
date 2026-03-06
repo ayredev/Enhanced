@@ -1,0 +1,13 @@
+define a rectangle as:
+    a number called width.
+    a number called height.
+
+to get the area of a rectangle:
+    multiply the rectangle's width and the rectangle's height.
+    give back the result.
+
+create a new rectangle called box.
+set box's width to 10.
+set box's height to 5.
+the number area is get the area of box.
+say area.
