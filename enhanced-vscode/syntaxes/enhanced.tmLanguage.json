@@ -1,0 +1,100 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Enhanced",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#types"
+        },
+        {
+            "include": "#structures"
+        },
+        {
+            "include": "#booleans"
+        },
+        {
+            "include": "#numbers"
+        },
+        {
+            "include": "#identifiers"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.enhanced",
+                    "match": "//.*$"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.enhanced",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.enhanced",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.enhanced",
+                    "match": "\\b(say|create|add|set|subtract|multiply|divide|update|start|connect|run|open|close|send|get|check|repeat|stop|return)\\b"
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "storage.type.enhanced",
+                    "match": "\\b(number|text|truth|list)\\b"
+                }
+            ]
+        },
+        "structures": {
+            "patterns": [
+                {
+                    "name": "keyword.other.enhanced",
+                    "match": "\\b(the|a|an|is|are|to|from|of|and|then|with|each|in|when|if|greater|less|than|equal|not)\\b"
+                }
+            ]
+        },
+        "booleans": {
+            "patterns": [
+                {
+                    "name": "constant.language.enhanced",
+                    "match": "\\b(true|false|yes|no)\\b"
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.enhanced",
+                    "match": "\\b\\d+(\\.\\d+)?\\b"
+                }
+            ]
+        },
+        "identifiers": {
+            "patterns": [
+                {
+                    "name": "variable.other.enhanced",
+                    "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+                }
+            ]
+        }
+    },
+    "scopeName": "source.enhanced"
+}

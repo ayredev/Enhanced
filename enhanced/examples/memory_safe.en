@@ -1,0 +1,8 @@
+create a new person called alice.
+say "Alice is alive on the heap.".
+check if alice is still valid.
+say the result.
+free alice.
+say "Alice has been freed.".
+check if alice is still valid.
+say the result.

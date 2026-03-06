@@ -1,0 +1,60 @@
+{
+  "name": "enhanced-lang",
+  "displayName": "Enhanced",
+  "description": "Syntax highlighting, autocomplete, and language server for the Enhanced programming language",
+  "version": "0.2.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:enhanced"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "enhanced",
+        "aliases": [
+          "Enhanced",
+          "en"
+        ],
+        "extensions": [
+          ".en"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/enhanced-icon.svg",
+          "dark": "./icons/enhanced-icon.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "enhanced",
+        "scopeName": "source.enhanced",
+        "path": "./syntaxes/enhanced.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Enhanced",
+      "properties": {
+        "enhanced.lsp.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Enhanced LSP server (lsp/server.py). Leave empty for auto-detect."
+        },
+        "enhanced.lsp.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to Python interpreter."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  }
+}

@@ -1,0 +1,10 @@
+the text hello is "Hello from Enhanced Lang Phase V!".
+write hello to the file "test_output.txt".
+
+say "Wrote to file. Now reading it back...".
+
+read the file "test_output.txt".
+say the result.
+
+check if the file "test_output.txt" exists.
+say the result.

@@ -1,0 +1,4 @@
+create a list of names called team.
+add "Alice" to team.
+add "Bob" to team.
+for each name in team say name.

@@ -1,0 +1,25 @@
+{
+  "name": "enhanced-lang",
+  "displayName": "Enhanced",
+  "description": "Syntax highlighting and language support for the Enhanced programming language",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [{
+      "id": "enhanced",
+      "aliases": ["Enhanced", "en"],
+      "extensions": [".en"],
+      "configuration": "./language-configuration.json",
+      "icon": {
+        "light": "./icons/enhanced-icon.svg",
+        "dark": "./icons/enhanced-icon.svg"
+      }
+    }],
+    "grammars": [{
+      "language": "enhanced",
+      "scopeName": "source.enhanced",
+      "path": "./syntaxes/enhanced.tmLanguage.json"
+    }]
+  }
+}

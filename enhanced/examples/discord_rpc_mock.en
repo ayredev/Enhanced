@@ -1,0 +1,14 @@
+say "Starting Discord RPC Mock...".
+
+load the library "discord_rpc".
+call "Discord_Initialize" with "123456" and 1 and null and 0.
+
+say "Setting presence...".
+the text presence is "Playing Enhanced Language!".
+call "Discord_UpdatePresence" with presence.
+
+say "Waiting for a bit...".
+wait 2 seconds.
+
+say "Done. Shutting down RPC...".
+call "Discord_Shutdown" with null.

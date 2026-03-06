@@ -1,0 +1,4 @@
+open the file "hello.txt" as my_file.
+write "Hello from Enhanced" to my_file.
+close my_file.
+say "File written safely.".

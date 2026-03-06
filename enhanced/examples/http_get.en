@@ -1,0 +1,3 @@
+say "Fetching from mock HTTP server...".
+get the url "https://example.com/api".
+say the response body.
