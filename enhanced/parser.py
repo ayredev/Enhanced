@@ -253,11 +253,205 @@ class Parser:
             handle_tok = self.expect_type("IDENTIFIER", "Expected handle name after 'through'")
             return LinearUse(handle_tok.value, 'send', data)
 
+        # --- Phase X: Backend Statements ---
+        elif self.match_val("VERB", "start"):
+            self.expect_val("KEYWORD", "a", "Expected 'a'")
+            self.expect_val("NOUN", "server", "Expected 'server'")
+            self.expect_val("CONNECTOR", "on", "Expected 'on'")
+            self.expect_val("NOUN", "port", "Expected 'port'")
+            port = self.parse_expression()
+            from ast_nodes import ServerStart
+            return ServerStart(port)
+
+        elif self.match_val("KEYWORD", "when"):
+            self.expect_val("KEYWORD", "someone", "Expected 'someone'")
+            method_tok = self.consume()
+            if method_tok.value not in ["gets", "posts", "puts", "deletes"]:
+                raise ParserError("Expected 'gets', 'posts', 'puts', or 'deletes'")
+            method = method_tok.value.upper()[:-1] # GETS -> GET
+            path = self.parse_expression()
+            self.expect_val("PUNCTUATION", ":", "Expected ':' after route path")
+            body = self._parse_block()
+            from ast_nodes import RouteHandler
+            return RouteHandler(method, path, body)
+
+        elif self.match_val("VERB", "send"):
+            is_json = False
+            status_code = 200
+            
+            if self.match_val("KEYWORD", "with"):
+                self.expect_val("NOUN", "status", "Expected 'status'")
+                status_code_tok = self.expect_type("LITERAL_NUMBER", "Expected status code")
+                status_code = int(status_code_tok.value)
+                
+            if self.match_val("KEYWORD", "json"):
+                is_json = True
+                
+            val = self.parse_expression()
+            
+            if self.match_val("CONNECTOR", "through"):
+                handle_tok = self.expect_type("IDENTIFIER", "Expected handle name after 'through'")
+                return LinearUse(handle_tok.value, 'send', val)
+            else:
+                from ast_nodes import SendResponse
+                return SendResponse(val, is_json, status_code)
+
+        elif self.match_val("VERB", "stop"):
+            tok = self.peek()
+            if tok and tok.value == "the":
+                self.consume()
+                self.expect_val("NOUN", "server", "Expected 'server'")
+                from ast_nodes import ServerStop
+                return ServerStop()
+            else:
+                from ast_nodes import StopMiddleware
+                return StopMiddleware()
+
+        elif self.match_val("VERB", "parse"):
+            source = self.parse_expression()
+            self.expect_val("KEYWORD", "as", "Expected 'as'")
+            self.expect_val("KEYWORD", "json", "Expected 'json'")
+            from ast_nodes import JsonParse
+            return JsonParse(source)
+
+        elif self.match_val("VERB", "serialize"):
+            val = self.parse_expression()
+            self.expect_val("KEYWORD", "as", "Expected 'as'")
+            self.expect_val("KEYWORD", "json", "Expected 'json'")
+            from ast_nodes import JsonSerialize
+            return JsonSerialize(val)
+
+        elif self.match_val("VERB", "run"):
+            self.expect_val("CONNECTOR", "on", "Expected 'on'")
+            db_name = self.expect_type("IDENTIFIER", "Expected db name").value
+            self.expect_val("PUNCTUATION", ":", "Expected ':'")
+            body = self._parse_block()
+            # The body elements will parse as normal AST nodes, but we actually need to intercept "create", "add", "update", "remove" inside DbRun
+            from ast_nodes import DatabaseRun
+            return DatabaseRun(db_name, body)
+
+        elif self.match_val("VERB", "ask"):
+            db_name = self.expect_type("IDENTIFIER", "Expected db name after 'ask'").value
+            self.expect_val("KEYWORD", "for", "Expected 'for'")
+            
+            conditions = None
+            if self.match_val("KEYWORD", "all"):
+                table = self.expect_type("NOUN", "Expected table name or identifier").value
+            else:
+                table = self.expect_type("NOUN", "Expected table name").value
+                self.expect_val("KEYWORD", "where", "Expected 'where'")
+                conditions = self.parse_expression()
+            
+            from ast_nodes import DatabaseQuery
+            return DatabaseQuery(db_name, table, conditions)
+
+        elif self.match_val("KEYWORD", "before"):
+            self.expect_val("KEYWORD", "every", "Expected 'every'")
+            self.expect_val("NOUN", "request", "Expected 'request'")
+            self.expect_val("PUNCTUATION", ":", "Expected ':'")
+            body = self._parse_block()
+            from ast_nodes import Middleware
+            return Middleware('before', body)
+
+        elif self.match_val("KEYWORD", "after"):
+            self.expect_val("KEYWORD", "every", "Expected 'every'")
+            self.expect_val("NOUN", "response", "Expected 'response'")
+            self.expect_val("PUNCTUATION", ":", "Expected ':'")
+            body = self._parse_block()
+            from ast_nodes import Middleware
+            return Middleware('after', body)
+
         # --- v2: method call pattern: <method_name> <object> ---
         # Handled as identifiers that could be method calls in analyzer
         # Fall through to identifier handling
 
         raise ParserError(f"I don't understand '{tok.value}' \u2014 did you mean something else?")
+    def _parse_block(self):
+        body = []
+        while self.peek():
+            nxt = self.peek()
+            if nxt.type == "KEYWORD" and nxt.value in ("when", "before", "after", "define"):
+                break
+            if nxt.type == "VERB" and nxt.value in ("start", "stop", "open", "close"):
+                break
+            # If the next statement is `say` and it's the very last thing, we could break, but let's just parse it.
+            # In Enhanced, normally a `send` terminates a handler logic functionally, so extra `say` is unreachable if it emitted after `send`
+            # Wait, `send` does not abort compilation!
+            
+            stmt = self.parse_statement()
+            if stmt:
+                body.append(stmt)
+            while self.match_val("PUNCTUATION", ".") or self.match_val("CONNECTOR", "then"):
+                pass
+        return body
+
+    def _parse_db_operation(self):
+        if self.match_val("VERB", "create"):
+            self.expect_val("NOUN", "table", "Expected 'table'")
+            self.expect_val("KEYWORD", "if", "Expected 'if'")
+            self.expect_val("KEYWORD", "not", "Expected 'not'")
+            self.expect_val("VERB", "exists", "Expected 'exists'")
+            table_name = self.expect_type("IDENTIFIER", "Expected table name").value
+            self.expect_val("CONNECTOR", "with", "Expected 'with'")
+            fields = []
+            while True:
+                field_name = self.expect_type("IDENTIFIER", "Expected field name").value
+                self.expect_val("KEYWORD", "as", "Expected 'as'")
+                field_type_word = self.consume().value
+                if field_type_word == "auto" and self.peek() and self.peek().value == "number":
+                    self.consume()
+                    field_type = "auto number"
+                else:
+                    field_type = field_type_word
+                fields.append((field_name, field_type))
+                if not self.match_val("PUNCTUATION", ","):
+                    break
+            from ast_nodes import DbCreateTable
+            return DbCreateTable(table_name, fields)
+            
+        elif self.match_val("VERB", "add"):
+            self.expect_val("CONNECTOR", "to", "Expected 'to'")
+            # Could be IDENTIFIER or NOUN
+            table_tok = self.consume()
+            table = table_tok.value
+            values = []
+            while self.peek() and self.peek().type in ("IDENTIFIER", "NOUN", "VERB"):
+                field = self.consume().value
+                if field in ("say", "ask", "run", "open", "close", "send"): # common verbs breaking out
+                    self.pos -= 1 # unconsume
+                    break
+                # The word is a field name
+                if self.peek() and self.peek().value == "is":
+                    self.expect_val("VERB", "is", "Expected 'is'")
+                else:
+                    self.pos -=1
+                    break
+                expr = self.parse_expression()
+                values.append((field, expr))
+            from ast_nodes import DbInsert
+            return DbInsert(table, values)
+            
+        elif self.match_val("VERB", "update"):
+            table_tok = self.consume() # IDENTIFIER or NOUN
+            table = table_tok.value
+            self.expect_val("VERB", "set", "Expected 'set'")
+            field_tok = self.consume()
+            field = field_tok.value
+            self.expect_val("CONNECTOR", "to", "Expected 'to'")
+            expr = self.parse_expression()
+            self.expect_val("KEYWORD", "where", "Expected 'where'")
+            conditions = self.parse_expression()
+            from ast_nodes import DbUpdate
+            return DbUpdate(table, [(field, expr)], conditions)
+            
+        elif self.match_val("VERB", "remove"):
+            self.expect_val("CONNECTOR", "from", "Expected 'from'")
+            table_tok = self.consume()
+            table = table_tok.value
+            self.expect_val("KEYWORD", "where", "Expected 'where'")
+            conditions = self.parse_expression()
+            from ast_nodes import DbDelete
+            return DbDelete(table, conditions)
 
     # ==== v2 Parse Helpers ====
 
@@ -315,7 +509,7 @@ class Parser:
     def _parse_enum_variants(self):
         """Parse enum variant list: 'pending. active. closed.'"""
         variants = []
-        while self.peek() and self.peek().type in ("IDENTIFIER", "NOUN", "VERB", "KEYWORD"):
+        while self.peek() and self.peek().type in ("IDENTIFIER", "NOUN", "VERB"):
             tok = self.consume()
             variants.append(tok.value)
             self.match_val("PUNCTUATION", ".")
@@ -809,7 +1003,21 @@ class Parser:
             return Identifier(tok.value)
 
         elif tok.type == "VERB":
+            verb_val = tok.value
+            saved_pos = self.pos
             self.consume()
+            
+            method_words = [verb_val]
+            while self.peek() and self.peek().value != "of" and self.peek().type not in ("PUNCTUATION", "CONNECTOR"):
+                method_words.append(self.consume().value)
+                
+            if self.match_val("CONNECTOR", "of"):
+                method_name = " ".join(method_words)
+                target_expr = self._parse_primary()
+                obj_name = target_expr.name if getattr(target_expr, 'name', None) else "unknown"
+                return MethodCall(obj_name, method_name, [])
+                
+            self.pos = saved_pos
             return Identifier(tok.value)
 
         raise ParserError(f"Expected expression, got {tok.type} '{tok.value}'")

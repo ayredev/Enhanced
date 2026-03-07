@@ -318,6 +318,150 @@ class IRGenerator:
         out.append(f"call void @enhanced_close_file(i8* %{node.name}_lv)")
 
 
+
+    # --- Phase v2 (Custom Types, Maps, Methods) ---
+
+    def visit_StructDef(self, node, out):
+        out.append(f"; StructDef {node.name}")
+        # In full LLVM, we'd emit: %{node.name} = type {{ i32, i8*, ... }}
+        # For simplicity in this demo compiler with uniform word sizes (i64/pointers),
+        # we can just use an opaque struct or an array of i64.
+        field_types = []
+        for f in node.fields:
+            if f.field_type == 'int' or f.field_type == 'bool':
+                field_types.append("i64")
+            else:
+                field_types.append("i8*")
+        type_str = ", ".join(field_types)
+        if not type_str:
+            type_str = "i8"
+        out.insert(2, f"%{node.name} = type {{ {type_str} }}")
+
+    def visit_StructInit(self, node, out):
+        out.append(f"; StructInit {node.name} of type {node.struct_type}")
+        # Malloc the struct size, assuming each field is 8 bytes
+        # We need the struct size from analyzer, but we'll approximate:
+        out.append(f"%{node.name}_raw = call {{i64, i64}} @enhanced_alloc(i64 64)")
+        out.append(f"%{node.name} = alloca {{i64, i64}}")
+        out.append(f"store {{i64, i64}} %{node.name}_raw, {{i64, i64}}* %{node.name}")
+
+    def visit_FieldSet(self, node, out):
+        out.append(f"; FieldSet {node.object_name}.{'.'.join(node.field_path)}")
+        # Evaluate value
+        val_arg = self._eval_arg(node.value, out, 'i8*')
+        # Here we would normally 'getelementptr' into the struct.
+        # As a simplified compiler, we'll just leave a comment
+        out.append(f"; store {val_arg} into field")
+
+    def visit_FieldGet(self, node, out):
+        out.append(f"; FieldGet {node.object_name}.{'.'.join(node.field_path)}")
+        reg = self.get_var()
+        out.append(f"{reg} = add i32 0, 0 ; dummy field get")
+        out.append(f"%result = alloca i32")
+        out.append(f"store i32 {reg}, i32* %result")
+        return reg
+
+    def visit_MethodDef(self, node, out):
+        # We don't generate method body inside main
+        # But we need a separate LLVM function signature
+        pass
+
+    def visit_MethodCall(self, node, out):
+        out.append(f"; MethodCall {node.object_name}.{node.method_name}")
+        reg = self.get_var()
+        out.append(f"{reg} = add i32 0, 0 ; dummy call")
+        out.append(f"%result = alloca i32")
+        out.append(f"store i32 {reg}, i32* %result")
+        return reg
+
+    def visit_Return(self, node, out):
+        out.append(f"; Return")
+        if node.value:
+            self._eval_arg(node.value, out, 'i32')
+        out.append(f"ret i32 0")
+
+    def visit_MapDecl(self, node, out):
+        out.append(f"; MapDecl {node.name}")
+        out.append(f"declare i8* @enhanced_map_create()")
+        out.append(f"%{node.name}_ptr = call i8* @enhanced_map_create()")
+        out.append(f"%{node.name} = alloca i8*")
+        out.append(f"store i8* %{node.name}_ptr, i8** %{node.name}")
+
+    def visit_MapSet(self, node, out):
+        out.append(f"; MapSet {node.map_name}")
+        key_arg = self._eval_arg(node.key, out, 'i8*')
+        val_arg = self._eval_arg(node.value, out, 'i8*')
+        out.append(f"declare void @enhanced_map_set(i8*, i8*, i8*)")
+        out.append(f"%{node.map_name}_ms = load i8*, i8** %{node.map_name}")
+        out.append(f"call void @enhanced_map_set(i8* %{node.map_name}_ms, i8* {key_arg}, i8* {val_arg})")
+
+    def visit_MapGet(self, node, out):
+        out.append(f"; MapGet {node.map_name}")
+        key_arg = self._eval_arg(node.key, out, 'i8*')
+        out.append(f"declare i8* @enhanced_map_get(i8*, i8*)")
+        out.append(f"%{node.map_name}_mg = load i8*, i8** %{node.map_name}")
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_map_get(i8* %{node.map_name}_mg, i8* {key_arg})")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
+
+    def visit_MapContains(self, node, out):
+        out.append(f"; MapContains {node.map_name}")
+        key_arg = self._eval_arg(node.key, out, 'i8*')
+        out.append(f"declare i32 @enhanced_map_contains(i8*, i8*)")
+        out.append(f"%{node.map_name}_mc = load i8*, i8** %{node.map_name}")
+        reg = self.get_var()
+        out.append(f"{reg} = call i32 @enhanced_map_contains(i8* %{node.map_name}_mc, i8* {key_arg})")
+        out.append(f"%result = alloca i32")
+        out.append(f"store i32 {reg}, i32* %result")
+        return reg
+
+    def visit_MapSize(self, node, out):
+        out.append(f"; MapSize {node.map_name}")
+        out.append(f"declare i32 @enhanced_map_size(i8*)")
+        out.append(f"%{node.map_name}_sz = load i8*, i8** %{node.map_name}")
+        reg = self.get_var()
+        out.append(f"{reg} = call i32 @enhanced_map_size(i8* %{node.map_name}_sz)")
+        out.append(f"%result = alloca i32")
+        out.append(f"store i32 {reg}, i32* %result")
+        return reg
+
+    def visit_MapRemove(self, node, out):
+        out.append(f"; MapRemove {node.map_name}")
+
+    def visit_EnumDef(self, node, out):
+        out.append(f"; EnumDef {node.name}")
+
+    def visit_EnumValue(self, node, out):
+        return "1"
+
+    def visit_EnumCheck(self, node, out):
+        out.append(f"; EnumCheck")
+        return "1"
+
+    def visit_OptionalDecl(self, node, out):
+        out.append(f"; OptionalDecl {node.name}")
+        out.append(f"declare i8* @enhanced_optional_create()")
+        out.append(f"%{node.name}_opt = call i8* @enhanced_optional_create()")
+        out.append(f"%{node.name} = alloca i8*")
+        out.append(f"store i8* %{node.name}_opt, i8** %{node.name}")
+
+    def visit_OptionalCheck(self, node, out):
+        out.append(f"; OptionalCheck {node.name}")
+        # we pretend it returns true for dummy code gen
+        return "1"
+
+    def visit_LiteralBool(self, node, out):
+        val = 1 if node.value else 0
+        return str(val)
+
+    def visit_OtherwiseBlock(self, node, out):
+        # Already handled by if-statement logic generating the blocks
+        for stmt in node.body:
+            self.visit(stmt, out)
+
+
 # Prepare format strings which might be needed
 def init_ir_generator():
     gen = IRGenerator()

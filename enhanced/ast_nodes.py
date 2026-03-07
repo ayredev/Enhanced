@@ -296,3 +296,128 @@ class OtherwiseBlock(ASTNode):
     def __init__(self, body):
         self.body = body
 
+# --- Phase X: Backend Stack ---
+
+# HTTP Server
+class ServerStart(ASTNode):
+    def __init__(self, port):
+        super().__init__()
+        self.port = port
+
+class RouteHandler(ASTNode):
+    def __init__(self, method, path, body):
+        super().__init__()
+        self.method = method  # "GET", "POST", "PUT", "DELETE"
+        self.path = path
+        self.body = body
+
+class SendResponse(ASTNode):
+    def __init__(self, value, is_json=False, status_code=200):
+        super().__init__()
+        self.value = value
+        self.is_json = is_json
+        self.status_code = status_code
+
+class GetRequestBody(ASTNode):
+    def __init__(self):
+        super().__init__()
+
+class GetUrlParam(ASTNode):
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+
+class GetQueryParam(ASTNode):
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+
+class GetRequestHeader(ASTNode):
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+
+class ServerStop(ASTNode):
+    def __init__(self):
+        super().__init__()
+
+# JSON
+class JsonParse(ASTNode):
+    def __init__(self, source):
+        super().__init__()
+        self.source = source
+
+class JsonSerialize(ASTNode):
+    def __init__(self, value):
+        super().__init__()
+        self.value = value
+
+# Database
+class DatabaseOpen(ASTNode):
+    def __init__(self, path, name):
+        super().__init__()
+        self.path = path
+        self.name = name
+
+class DatabaseClose(ASTNode):
+    def __init__(self, db_name):
+        super().__init__()
+        self.db_name = db_name
+
+class DatabaseRun(ASTNode):
+    def __init__(self, db_name, operation):
+        super().__init__()
+        self.db_name = db_name
+        self.operation = operation
+
+class DatabaseQuery(ASTNode):
+    def __init__(self, db_name, table, conditions=None):
+        super().__init__()
+        self.db_name = db_name
+        self.table = table
+        self.conditions = conditions # None means 'all'
+
+# Database Operations for DatabaseRun
+class DbCreateTable(ASTNode):
+    def __init__(self, table, fields):
+        super().__init__()
+        self.table = table
+        self.fields = fields # list of (name, type)
+
+class DbInsert(ASTNode):
+    def __init__(self, table, values):
+        super().__init__()
+        self.table = table
+        self.values = values # list of (field, expr_node)
+
+class DbUpdate(ASTNode):
+    def __init__(self, table, sets, conditions):
+        super().__init__()
+        self.table = table
+        self.sets = sets # list of (field, expr_node)
+        self.conditions = conditions
+
+class DbDelete(ASTNode):
+    def __init__(self, table, conditions):
+        super().__init__()
+        self.table = table
+        self.conditions = conditions
+
+# Middleware
+class Middleware(ASTNode):
+    def __init__(self, timing, body):
+        super().__init__()
+        self.timing = timing # "before" or "after"
+        self.body = body
+
+class StopMiddleware(ASTNode):
+    def __init__(self):
+        super().__init__()
+
+# Environment Variables
+class GetEnvVar(ASTNode):
+    def __init__(self, name):
+        super().__init__()
+        self.name = name
+
+

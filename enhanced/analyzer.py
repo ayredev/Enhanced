@@ -36,6 +36,22 @@ class SemanticAnalyzer:
 
     def visit_VarDecl(self, node):
         expr_type = self.visit(node.value)
+        # Check if reassignment
+        if node.var_type == "any":
+            try:
+                sym = self.symtab.lookup(node.name.name, node.line)
+                expected_type = sym['type']
+                if expected_type == TypeSystem.OPTIONAL:
+                    if expr_type != "any":  # nothing
+                        # Assigning actual value checks against inner_type
+                        expected_type = sym.get('inner_type', 'any')
+                if expected_type != TypeSystem.OPTIONAL or expr_type != "any":
+                    TypeSystem.check_assignment(expected_type, expr_type, node.line, node.name.name)
+                sym['has_value'] = True
+                node.value_type = expr_type
+                return
+            except SymbolTableError:
+                pass
         # Check against inferred
         try:
             TypeSystem.check_assignment(node.var_type, expr_type, node.line, node.name.name)
@@ -140,6 +156,12 @@ class SemanticAnalyzer:
             node.value_type = sym['type']
             return sym['type']
         except SymbolTableError as e:
+            # Check if it's an enum variant
+            if hasattr(self, 'enum_registry'):
+                for e_name, variants in self.enum_registry.enums.items():
+                    if node.name in variants:
+                        node.value_type = e_name
+                        return e_name
             raise SemanticError(str(e))
 
     def visit_LiteralNumber(self, node):
@@ -342,6 +364,14 @@ class SemanticAnalyzer:
         except SymbolTableError as e:
             raise SemanticError(str(e))
         obj_type = sym['type']
+        
+        # Support optional unwrapping: 'say nickname's value'
+        if obj_type == TypeSystem.OPTIONAL:
+            if len(node.field_path) == 1 and node.field_path[0] == "value":
+                node.value_type = sym.get('inner_type', 'any')
+                return node.value_type
+            raise SemanticError(f"I found a problem on line {node.line}: Optionals only have a 'value' field.")
+
         resolved_type, err = self.struct_registry.resolve_field_path(obj_type, node.field_path)
         if err:
             raise SemanticError(f"I found a problem on line {node.line}: {err}")
