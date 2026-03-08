@@ -184,12 +184,18 @@ class Parser:
 
             # Map or legacy set
             val_or_key = self.parse_expression()
+            
+            # Check for map set after parse_expression
             if self.match_val("KEYWORD", "in"):
                 map_expr = self.parse_expression()
                 map_name = map_expr.name if isinstance(map_expr, Identifier) else "unknown"
                 self.expect_val("CONNECTOR", "to", "Expected 'to'")
                 key_or_val = self.parse_expression()
                 return MapSet(map_name, key_or_val, val_or_key) # MapSet(map_name, key, value)
+            
+            # If parse_expression already returned a MapSet (from [key] in [map] as an expression)
+            # but we are in a 'set' statement, we need to handle it carefully.
+            # However, the pattern 'set [value] in [map] to [key]' is what we want.
             
             # Legacy set (e.g. for struct fields)
             return self._parse_set_legacy(val_or_key)
@@ -974,13 +980,16 @@ class Parser:
             expr.line = line
 
         # [expression] in [expression]
-        if self.match_val("KEYWORD", "in"):
-            collection = self._parse_primary()
-            if isinstance(collection, Identifier):
-                expr = MapGet(collection.name, expr)
-            else:
-                expr = ListContains(collection, expr)
-            expr.line = line
+        # Only parse 'in' if it's NOT followed by 'to' (which would be a 'set ... in ... to' statement)
+        if self.peek() and self.peek().value == "in":
+            if not (self.peek_at(2) and self.peek_at(2).value == "to"):
+                self.consume() # in
+                collection = self._parse_primary()
+                if isinstance(collection, Identifier):
+                    expr = MapGet(collection.name, expr)
+                else:
+                    expr = ListContains(collection, expr)
+                expr.line = line
 
         while self.peek() and self.peek().type == "CONNECTOR" and self.peek().value == "to":
             if self.pos + 3 < len(self.tokens) and \

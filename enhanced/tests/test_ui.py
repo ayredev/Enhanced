@@ -24,6 +24,7 @@ class TestUI(unittest.TestCase):
         '''
         tokens = Lexer(code).tokenize()
         ast = Parser(tokens).parse()
+        for stmt in ast.statements: print(type(stmt))
         SemanticAnalyzer().analyze(ast)
         self.assertEqual(len(ast.statements), 5)
 
