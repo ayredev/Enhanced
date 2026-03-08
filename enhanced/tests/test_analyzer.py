@@ -58,7 +58,7 @@ add "Alice" to scores.
 add 99 to scores.'''
         with self.assertRaises(SemanticError) as context:
             self.run_analyzer(code)
-        self.assertIn("'scores' holds a texts, but you're trying to add a number.", str(context.exception))
+        self.assertIn("I found a problem on line 3: 'scores' holds texts, but you're trying to add a number.", str(context.exception))
 
 if __name__ == '__main__':
     unittest.main()

@@ -527,6 +527,114 @@ class SemanticAnalyzer:
         node.value_type = TypeSystem.BOOL
         return TypeSystem.BOOL
 
+    def visit_ServerStart(self, node):
+        self.visit(node.port)
+
+    def visit_RouteHandler(self, node):
+        self.symtab.enter_scope()
+        try:
+            for stmt in node.body:
+                self.visit(stmt)
+        finally:
+            self.symtab.exit_scope()
+
+    def visit_SendResponse(self, node):
+        self.visit(node.value)
+        if hasattr(node, "status_code") and node.status_code:
+            self.visit(node.status_code)
+
+    def visit_GetRequestBody(self, node):
+        node.value_type = TypeSystem.STR
+        return TypeSystem.STR
+
+    def visit_GetUrlParam(self, node):
+        node.value_type = TypeSystem.STR
+        return TypeSystem.STR
+
+    def visit_GetQueryParam(self, node):
+        node.value_type = TypeSystem.STR
+        return TypeSystem.STR
+
+    def visit_GetRequestHeader(self, node):
+        node.value_type = TypeSystem.STR
+        return TypeSystem.STR
+
+    def visit_HttpResponseBody(self, node):
+        node.value_type = TypeSystem.STR
+        return TypeSystem.STR
+
+    def visit_ServerStop(self, node):
+        pass
+
+    def visit_JsonParse(self, node):
+        self.visit(node.source)
+        node.value_type = TypeSystem.MAP
+        self.symtab.define("result", TypeSystem.MAP, getattr(node, 'line', 0))
+        return TypeSystem.MAP
+
+    def visit_JsonSerialize(self, node):
+        self.visit(node.value)
+        node.value_type = TypeSystem.STR
+        self.symtab.define("result", TypeSystem.STR, getattr(node, 'line', 0))
+        return TypeSystem.STR
+
+    def visit_DatabaseOpen(self, node):
+        self.visit(node.path)
+        self.symtab.define(node.name, "database", getattr(node, 'line', 0))
+
+    def visit_DatabaseClose(self, node):
+        pass
+
+    def visit_DatabaseRun(self, node):
+        try:
+            self.symtab.lookup(node.db_name, getattr(node, 'line', 0))
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        self.visit(node.operation)
+
+    def visit_DatabaseQuery(self, node):
+        try:
+            self.symtab.lookup(node.db_name, getattr(node, 'line', 0))
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        if node.conditions:
+            self.visit(node.conditions)
+        node.value_type = TypeSystem.LIST
+        self.symtab.define("result", TypeSystem.LIST, getattr(node, 'line', 0))
+        return TypeSystem.LIST
+
+    def visit_DbCreateTable(self, node):
+        pass
+
+    def visit_DbInsert(self, node):
+        for field, expr in node.values:
+            self.visit(expr)
+
+    def visit_DbUpdate(self, node):
+        for field, expr in node.updates:
+            self.visit(expr)
+        if node.conditions:
+            self.visit(node.conditions)
+
+    def visit_DbDelete(self, node):
+        if node.conditions:
+            self.visit(node.conditions)
+
+    def visit_Middleware(self, node):
+        self.symtab.enter_scope()
+        try:
+            for stmt in node.body:
+                self.visit(stmt)
+        finally:
+            self.symtab.exit_scope()
+
+    def visit_StopMiddleware(self, node):
+        pass
+
+    def visit_GetEnvVar(self, node):
+        node.value_type = TypeSystem.STR
+        return TypeSystem.STR
+
     def visit_OtherwiseBlock(self, node):
         self.symtab.enter_scope()
         try:

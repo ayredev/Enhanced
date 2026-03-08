@@ -75,6 +75,18 @@ class LinearTypeChecker:
             return
         self.resources[name] = LinearResource(name, node.resource_type, line)
 
+    def _visit_DatabaseOpen(self, node):
+        name = node.name
+        line = getattr(node, 'line', 0)
+        if name in self.resources and self.resources[name].state == UNCONSUMED:
+            self.errors.append(
+                f"You tried to open database '{name}' on line {line}, but it's already open "
+                f"from line {self.resources[name].open_line}.\n"
+                f"Close it first before opening again."
+            )
+            return
+        self.resources[name] = LinearResource(name, 'database', line)
+
     # --- Linear resource use ---
     def _visit_LinearUse(self, node):
         name = node.name

@@ -39,18 +39,18 @@ declare i8* @enhanced_get_env(i8*)
 
 define i32 @main() {
 entry:
-    ; Declaring list team
-    ; Appending to list team
-    ; Appending to list team
-    ; ForLoop start
-    br label %loop_entry
-    loop_entry:
-    ; ... loop condition dummy ...
-    br i1 1, label %loop_body, label %loop_exit
-    loop_body:
-    ; Print statement for string variable name
-    call i32 @puts(i8* %name)
-    br label %loop_entry
-    loop_exit:
+    %x = alloca i32
+    store i32 5, i32* %x
+    %y = alloca i32
+    store i32 10, i32* %y
+    %v3 = load i32, i32* %x
+    %v4 = load i32, i32* %y
+    %v1 = load i32, i32* %x
+    %v2 = load i32, i32* %y
+    %v5 = add i32 %v1, %v2
+    %result = alloca i32
+    store i32 %v5, i32* %result
+    %v6 = load i32, i32* %result
+    call i32 (i8*, ...) @printf(i8* getelementptr inbounds ([4 x i8], [4 x i8]* @fmt_int, i32 0, i32 0), i32 %v6)
     ret i32 0
 }

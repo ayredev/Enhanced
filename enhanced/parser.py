@@ -240,8 +240,15 @@ class Parser:
                 self.expect_val("KEYWORD", "as", "Expected 'as'")
                 handle_tok = self.expect_type("IDENTIFIER", "Expected handle name after 'as'")
                 return LinearOpen('socket', addr, handle_tok.value)
+            elif resource_tok and resource_tok.value == "database":
+                self.consume()
+                path = self.parse_expression()
+                self.expect_val("KEYWORD", "as", "Expected 'as'")
+                handle_tok = self.expect_type("IDENTIFIER", "Expected handle name after 'as'")
+                from ast_nodes import DatabaseOpen
+                return DatabaseOpen(path, handle_tok.value)
             else:
-                raise ParserError("Expected 'file' or 'connection' after 'open the'")
+                raise ParserError("Expected 'file', 'connection', or 'database' after 'open the'")
 
         elif self.match_val("VERB", "close"):
             handle_tok = self.expect_type("IDENTIFIER", "Expected handle name after 'close'")
@@ -655,7 +662,40 @@ class Parser:
 
         elif noun.value == "response":
             self.expect_val("NOUN", "body", "Expected 'body'")
+            from ast_nodes import HttpResponseBody
             return HttpResponseBody()
+
+        elif noun.value == "request":
+            next_tok = self.peek()
+            if next_tok and next_tok.value == "body":
+                self.consume()
+                from ast_nodes import GetRequestBody
+                return GetRequestBody()
+            elif next_tok and next_tok.value == "header":
+                self.consume()
+                name_tok = self.expect_type("LITERAL_STRING", "Expected request header name")
+                from ast_nodes import GetRequestHeader
+                return GetRequestHeader(name_tok.value.strip('"'))
+            else:
+                raise ParserError("Expected 'body' or 'header' after 'request'")
+
+        elif noun.value == "url":
+            self.expect_val("NOUN", "param", "Expected 'param' after 'url'")
+            name_tok = self.expect_type("LITERAL_STRING", "Expected param name")
+            from ast_nodes import GetUrlParam
+            return GetUrlParam(name_tok.value.strip('"'))
+
+        elif noun.value == "query":
+            self.expect_val("NOUN", "param", "Expected 'param' after 'query'")
+            name_tok = self.expect_type("LITERAL_STRING", "Expected param name")
+            from ast_nodes import GetQueryParam
+            return GetQueryParam(name_tok.value.strip('"'))
+
+        elif noun.value == "environment":
+            self.expect_val("NOUN", "variable", "Expected 'variable'")
+            name_tok = self.expect_type("LITERAL_STRING", "Expected env var name")
+            from ast_nodes import GetEnvVar
+            return GetEnvVar(name_tok.value.strip('"'))
 
         else:
             return Identifier(noun.value)
@@ -762,7 +802,7 @@ class Parser:
             if type_tok:
                 self.consume()
                 type_map = {"numbers": "int", "texts": "str", "truths": "bool",
-                            "persons": "person", "products": "product"}
+                            "names": "str", "persons": "person", "products": "product"}
                 element_type = type_map.get(type_tok.value, type_tok.value)
         self.expect_val("VERB", "called", "Expected 'called'")
         name_tok = self.peek()

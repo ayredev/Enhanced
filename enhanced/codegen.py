@@ -4,6 +4,7 @@ from analyzer import SemanticAnalyzer, SemanticError
 class IRGenerator:
     def __init__(self):
         self.output_lines = []
+        self.global_lines = []
         self.string_constants = {} # name -> value string
         self.var_count = 0 
         self.block_count = 0
@@ -35,18 +36,37 @@ class IRGenerator:
         self.output_lines.append("declare void @enhanced_write_handle(i8*, i8*)")
         self.output_lines.append("declare i8* @enhanced_read_handle(i8*)")
         
+        # Backend Runtime Declarations
+        self.output_lines.append("declare void @enhanced_server_start(i32)")
+        self.output_lines.append("declare void @enhanced_server_stop()")
+        self.output_lines.append("declare void @enhanced_server_route(i8*, i8*, void()*)")
+        self.output_lines.append("declare void @enhanced_send_response(i32, i8*)")
+        self.output_lines.append("declare i8* @enhanced_get_request_body()")
+        self.output_lines.append("declare i8* @enhanced_get_url_param(i8*)")
+        self.output_lines.append("declare i8* @enhanced_json_parse(i8*)")
+        self.output_lines.append("declare i8* @enhanced_json_serialize(i8*)")
+        self.output_lines.append("declare i8* @enhanced_db_open(i8*)")
+        self.output_lines.append("declare void @enhanced_db_close(i8*)")
+        self.output_lines.append("declare void @enhanced_db_exec(i8*, i8*)")
+        self.output_lines.append("declare i8* @enhanced_db_query(i8*, i8*, i8*)")
+        self.output_lines.append("declare void @enhanced_add_middleware(i8*, void()*)")
+        self.output_lines.append("declare void @enhanced_stop_middleware()")
+        self.output_lines.append("declare i8* @enhanced_get_query_param(i8*)")
+        self.output_lines.append("declare i8* @enhanced_get_request_header(i8*)")
+        self.output_lines.append("declare i8* @enhanced_get_env(i8*)")
+
         main_body = []
         for stmt in ast.statements:
             self.visit(stmt, main_body)
 
         # Output strings
         for name, value in self.string_constants.items():
-            # LLVM strings need to be null terminated
             val_bytes = value.encode('utf-8') + b'\\00'
             val_len = len(value) + 1
-            # Note: in real LLVM this needs exact byte length. e.g. [14 x i8]
             self.output_lines.append(f"@{name} = private unnamed_addr constant [{val_len} x i8] c\"{value}\\00\", align 1")
             
+        self.output_lines.extend(self.global_lines)
+
         self.output_lines.append("\ndefine i32 @main() {")
         self.output_lines.append("entry:")
         self.output_lines.extend(["    " + line for line in main_body])
@@ -128,6 +148,14 @@ class IRGenerator:
                 out.append(f"%{node.name.name} = alloca i8*")
                 # simplify to store just a pointer ref
                 out.append(f"store i8* getelementptr inbounds ([{val_len} x i8], [{val_len} x i8]* @{str_id}, i32 0, i32 0), i8** %{node.name.name}")
+
+    def visit_Identifier(self, node, out):
+        reg = self.get_var()
+        if node.value_type in ('int', 'bool'):
+            out.append(f"{reg} = load i32, i32* %{node.name}")
+        else: # str, custom types, etc. are pointers
+            out.append(f"{reg} = load i8*, i8** %{node.name}")
+        return reg
             
     def visit_BinaryOp(self, node, out):
         if node.op in ('+', '-', '*', '/', '%'):
@@ -338,6 +366,7 @@ class IRGenerator:
         out.insert(2, f"%{node.name} = type {{ {type_str} }}")
 
     def visit_StructInit(self, node, out):
+        out.append(f"; HeapAlloc '{node.name}' (type={node.struct_type})")
         out.append(f"; StructInit {node.name} of type {node.struct_type}")
         # Malloc the struct size, assuming each field is 8 bytes
         # We need the struct size from analyzer, but we'll approximate:
@@ -460,6 +489,225 @@ class IRGenerator:
         # Already handled by if-statement logic generating the blocks
         for stmt in node.body:
             self.visit(stmt, out)
+
+    def visit_ServerStart(self, node, out):
+        out.append("; ServerStart")
+        port_reg = self._eval_arg(node.port, out, 'i32')
+        out.append(f"call void @enhanced_server_start(i32 {port_reg})")
+
+    def visit_RouteHandler(self, node, out):
+        out.append("; RouteHandler")
+        func_name = f"@route_handler_{self.block_count}"
+        self.block_count += 1
+        
+        body_lines = []
+        for stmt in node.body:
+            self.visit(stmt, body_lines)
+            
+        self.global_lines.append(f"define void {func_name}() {{")
+        self.global_lines.append("entry:")
+        self.global_lines.extend(["    " + line for line in body_lines])
+        self.global_lines.append("    ret void")
+        self.global_lines.append("}")
+        
+        method_str = node.method
+        method_name = f"method_{self.block_count}"
+        self.string_constants[method_name] = method_str
+        method_ptr = f"getelementptr inbounds ([{len(method_str)+1} x i8], [{len(method_str)+1} x i8]* @{method_name}, i32 0, i32 0)"
+        
+        path_str = node.path
+        path_name = f"path_{self.block_count}"
+        self.string_constants[path_name] = path_str
+        path_ptr = f"getelementptr inbounds ([{len(path_str)+1} x i8], [{len(path_str)+1} x i8]* @{path_name}, i32 0, i32 0)"
+        
+        out.append(f"call void @enhanced_server_route(i8* {method_ptr}, i8* {path_ptr}, void()* {func_name})")
+
+    def visit_SendResponse(self, node, out):
+        out.append("; SendResponse")
+        val_reg = self._eval_arg(node.value, out, 'i8*')
+        status_code = node.status_code if hasattr(node, "status_code") and node.status_code else 200
+        
+        # In a real implementation, is_json would trigger serialization
+        if node.is_json:
+            out.append("; (note: is_json flag was set)")
+
+        out.append(f"call void @enhanced_send_response(i32 {status_code}, i8* {val_reg})")
+
+    def visit_GetRequestBody(self, node, out):
+        out.append("; GetRequestBody")
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_get_request_body()")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
+
+    def visit_GetUrlParam(self, node, out):
+        out.append("; GetUrlParam")
+        name_str = node.name
+        name_const = f"urlparam_{self.block_count}"
+        self.block_count += 1
+        self.string_constants[name_const] = name_str
+        name_ptr = f"getelementptr inbounds ([{len(name_str)+1} x i8], [{len(name_str)+1} x i8]* @{name_const}, i32 0, i32 0)"
+        
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_get_url_param(i8* {name_ptr})")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
+
+    def visit_GetQueryParam(self, node, out):
+        out.append(f"; GetQueryParam '{node.name}'")
+        name_str = node.name
+        name_const = f"queryparam_{self.block_count}"
+        self.block_count += 1
+        self.string_constants[name_const] = name_str
+        name_ptr = f"getelementptr inbounds ([{len(name_str)+1} x i8], [{len(name_str)+1} x i8]* @{name_const}, i32 0, i32 0)"
+        
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_get_query_param(i8* {name_ptr})")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
+
+    def visit_GetRequestHeader(self, node, out):
+        out.append(f"; GetRequestHeader '{node.name}'")
+        name_str = node.name
+        name_const = f"header_{self.block_count}"
+        self.block_count += 1
+        self.string_constants[name_const] = name_str
+        name_ptr = f"getelementptr inbounds ([{len(name_str)+1} x i8], [{len(name_str)+1} x i8]* @{name_const}, i32 0, i32 0)"
+        
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_get_request_header(i8* {name_ptr})")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
+
+    def visit_ServerStop(self, node, out):
+        out.append("; ServerStop")
+        out.append("call void @enhanced_server_stop()")
+
+    def visit_JsonParse(self, node, out):
+        out.append("; JsonParse")
+        val_reg = self._eval_arg(node.source, out, 'i8*')
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_json_parse(i8* {val_reg})")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
+
+    def visit_JsonSerialize(self, node, out):
+        out.append("; JsonSerialize")
+        val_reg = self._eval_arg(node.value, out, 'i8*')
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_json_serialize(i8* {val_reg})")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
+
+    def visit_DatabaseOpen(self, node, out):
+        out.append("; DatabaseOpen")
+        path_reg = self._eval_arg(node.path, out, 'i8*')
+        out.append(f"%{node.name} = call i8* @enhanced_db_open(i8* {path_reg})")
+
+    def visit_DatabaseClose(self, node, out):
+        out.append("; DatabaseClose")
+        out.append(f"call void @enhanced_db_close(i8* %{node.name})")
+
+    def visit_DatabaseRun(self, node, out):
+        out.append(f"; DatabaseRun on {node.db_name}")
+        # In a real compiler, we would pass the db_name handle down
+        for op in node.operation:
+            self.visit(op, out)
+        
+    def visit_DatabaseQuery(self, node, out):
+        out.append(f"; DatabaseQuery on {node.db_name} for table {node.table}")
+        # This is highly simplified. A real impl would build a query.
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_db_query(i8* %{node.db_name}, i8* null, i8* null)")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
+
+    def visit_DbCreateTable(self, node, out):
+        out.append(f"; DbCreateTable '{node.table}'")
+        fields_str = ", ".join([f"{name} {typ}" for name, typ in node.fields])
+        sql = f"CREATE TABLE IF NOT EXISTS {node.table} ({fields_str});"
+        
+        sql_name = f"sql_{self.block_count}"
+        self.block_count += 1
+        self.string_constants[sql_name] = sql
+        sql_ptr = f"getelementptr inbounds ([{len(sql)+1} x i8], [{len(sql)+1} x i8]* @{sql_name}, i32 0, i32 0)"
+
+        out.append(f"call void @enhanced_db_exec(i8* %db, i8* {sql_ptr})")
+
+
+    def visit_DbInsert(self, node, out):
+        out.append(f"; DbInsert into '{node.table}'")
+        # This is also highly simplified. We are not evaluating expressions.
+        sql = f"INSERT INTO {node.table} ..."
+        sql_name = f"sql_{self.block_count}"
+        self.block_count += 1
+        self.string_constants[sql_name] = sql
+        sql_ptr = f"getelementptr inbounds ([{len(sql)+1} x i8], [{len(sql)+1} x i8]* @{sql_name}, i32 0, i32 0)"
+        out.append(f"call void @enhanced_db_exec(i8* %db, i8* {sql_ptr})")
+
+    def visit_DbUpdate(self, node, out):
+        out.append(f"; DbUpdate '{node.table}'")
+        sql = f"UPDATE {node.table} SET ..."
+        sql_name = f"sql_{self.block_count}"
+        self.block_count += 1
+        self.string_constants[sql_name] = sql
+        sql_ptr = f"getelementptr inbounds ([{len(sql)+1} x i8], [{len(sql)+1} x i8]* @{sql_name}, i32 0, i32 0)"
+        out.append(f"call void @enhanced_db_exec(i8* %db, i8* {sql_ptr})")
+
+    def visit_DbDelete(self, node, out):
+        out.append(f"; DbDelete from '{node.table}'")
+        sql = f"DELETE FROM {node.table} WHERE ..."
+        sql_name = f"sql_{self.block_count}"
+        self.block_count += 1
+        self.string_constants[sql_name] = sql
+        sql_ptr = f"getelementptr inbounds ([{len(sql)+1} x i8], [{len(sql)+1} x i8]* @{sql_name}, i32 0, i32 0)"
+        out.append(f"call void @enhanced_db_exec(i8* %db, i8* {sql_ptr})")
+
+    def visit_Middleware(self, node, out):
+        out.append(f"; Middleware {node.timing}")
+        func_name = f"@middleware_handler_{self.block_count}"
+        self.block_count += 1
+        
+        body_lines = []
+        for stmt in node.body:
+            self.visit(stmt, body_lines)
+            
+        self.global_lines.append(f"define void {func_name}() {{")
+        self.global_lines.append("entry:")
+        self.global_lines.extend(["    " + line for line in body_lines])
+        self.global_lines.append("    ret void")
+        self.global_lines.append("}")
+        
+        timing_str = node.timing
+        timing_name = f"timing_{self.block_count}"
+        self.string_constants[timing_name] = timing_str
+        timing_ptr = f"getelementptr inbounds ([{len(timing_str)+1} x i8], [{len(timing_str)+1} x i8]* @{timing_name}, i32 0, i32 0)"
+
+        out.append(f"call void @enhanced_add_middleware(i8* {timing_ptr}, void()* {func_name})")
+
+    def visit_StopMiddleware(self, node, out):
+        out.append(f"; StopMiddleware")
+        out.append("call void @enhanced_stop_middleware()")
+
+    def visit_GetEnvVar(self, node, out):
+        out.append("; GetEnvVar")
+        name_str = node.name
+        name_const = f"envvar_{self.block_count}"
+        self.block_count += 1
+        self.string_constants[name_const] = name_str
+        name_ptr = f"getelementptr inbounds ([{len(name_str)+1} x i8], [{len(name_str)+1} x i8]* @{name_const}, i32 0, i32 0)"
+        reg = self.get_var()
+        out.append(f"{reg} = call i8* @enhanced_get_env(i8* {name_ptr})")
+        out.append(f"%result = alloca i8*")
+        out.append(f"store i8* {reg}, i8** %result")
+        return reg
 
 
 # Prepare format strings which might be needed

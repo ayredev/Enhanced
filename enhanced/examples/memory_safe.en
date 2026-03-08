@@ -1,3 +1,6 @@
+define a person as:
+    a text called name.
+
 create a new person called alice.
 say "Alice is alive on the heap.".
 check if alice is still valid.

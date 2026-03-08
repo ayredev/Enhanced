@@ -46,6 +46,17 @@ class TypeSystem:
         return f"a {type_name}"
         
     @classmethod
+    def plural_noun_for_type(cls, type_name):
+        if type_name == cls.INT:
+            return "numbers"
+        elif type_name == cls.STR:
+            return "texts"
+        elif type_name == cls.BOOL:
+            return "truths"
+        # For custom types like 'person', just add 's'
+        return f"{type_name}s"
+
+    @classmethod
     def check_condition(cls, cond_type, line):
         if cond_type != cls.BOOL:
             raise TypeError(f"I found a problem on line {line}: The condition needs to be true or false, but you gave {cls.noun_for_type(cond_type)}.")
@@ -62,5 +73,5 @@ class TypeSystem:
         if list_type != cls.LIST:
             raise TypeError(f"I found a problem on line {line}: '{name}' is {cls.noun_for_type(list_type)}, not a list. You can't add to it.")
         if element_type is not None and val_type != element_type:
-            raise TypeError(f"I found a problem on line {line}: '{name}' holds {cls.noun_for_type(element_type)}s, but you're trying to add {cls.noun_for_type(val_type)}.")
+            raise TypeError(f"I found a problem on line {line}: '{name}' holds {cls.plural_noun_for_type(element_type)}, but you're trying to add {cls.noun_for_type(val_type)}.")
 
