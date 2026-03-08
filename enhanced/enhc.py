@@ -9,6 +9,7 @@ from parser import Parser
 from printer import ast_to_json
 from analyzer import SemanticAnalyzer
 from codegen import IRGenerator
+from wasm_codegen import WasmGenerator
 from pipeline import Pipeline, PipelineError
 from memory.mem_analyzer import MemoryAnalyzer, MemoryAnalysisError
 
@@ -22,6 +23,7 @@ def main():
     parser.add_argument("--ast", action="store_true", help="Stop after parsing and show AST JSON")
     parser.add_argument("--check", action="store_true", help="Run semantic analysis only")
     parser.add_argument("--lsp", action="store_true", help="Start the Language Server (LSP)")
+    parser.add_argument("--target", default="native", choices=["native", "web"], help="Compilation target (native or web)")
     parser.add_argument("--version", action="store_true", help="Print compiler version")
     parser.add_argument("--help", action="store_true", help="Print this help message")
     
@@ -40,6 +42,7 @@ def main():
         print(f"Enhanced Compiler {VERSION}")
         print("Usage:")
         print("  enhc <file.en>              -> compile and produce executable")
+        print("  enhc <file.en> --target web -> compile for WebAssembly")
         print("  enhc <file.en> --run        -> compile and immediately run it")
         print("  enhc <file.en> --ir         -> stop after IR generation, show the .ll file")
         print("  enhc <file.en> --ast        -> stop after parsing, show the AST JSON")
@@ -79,14 +82,18 @@ def main():
         mem_analyzer = MemoryAnalyzer()
         typed_ast = mem_analyzer.analyze(typed_ast, analyzer.symtab)
             
-        generator = IRGenerator()
+        if args.target == "web":
+            generator = WasmGenerator()
+        else:
+            generator = IRGenerator()
+            
         ir_str = generator.generate(typed_ast)
         
         if args.ir:
             print(ir_str)
             sys.exit(0)
             
-        pipe = Pipeline(keep_ll=True)
+        pipe = Pipeline(keep_ll=True, target=args.target)
         exe_path, stats = pipe.run(source_path)
         
         print(f"[OK] Lexed {stats['tokens']} tokens")

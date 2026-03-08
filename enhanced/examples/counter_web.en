@@ -1,0 +1,4 @@
+the number count is 0.
+for each number i from 1 to 5:
+    count is add count and 1.
+    say count.

@@ -1,0 +1,10 @@
+define a Person as:
+    the name is "Unknown"
+    the age is 0
+
+the Person p is a new Person.
+p.name is "Alice"
+p.age is 30
+
+say p.name
+say p.age
