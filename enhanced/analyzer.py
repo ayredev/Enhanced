@@ -500,11 +500,41 @@ class SemanticAnalyzer:
         self.symtab.define(node.name, TypeSystem.OPTIONAL, node.line)
         sym = self.symtab.lookup(node.name, node.line)
         sym['inner_type'] = node.inner_type
-        sym['has_value'] = node.value is not None and not (hasattr(node.value, 'value') and node.value.value is None)
         if node.value:
             self.visit(node.value)
         node.value_type = TypeSystem.OPTIONAL
-        return TypeSystem.OPTIONAL
+
+    # --- Phase XII: UI Framework Visitors ---
+    def visit_UICreateElement(self, node):
+        self.symtab.define(node.name, 'ui_element', node.line)
+        sym = self.symtab.lookup(node.name, node.line)
+        sym['ui_type'] = node.element_type
+        node.value_type = 'ui_element'
+        return 'ui_element'
+
+    def visit_UISetProperty(self, node):
+        try:
+            self.symtab.lookup(node.element_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        self.visit(node.value)
+
+    def visit_UIEventHandler(self, node):
+        try:
+            self.symtab.lookup(node.element_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        self.symtab.enter_scope()
+        for stmt in node.body:
+            self.visit(stmt)
+        self.symtab.exit_scope()
+
+    def visit_UIAddToScreen(self, node):
+        try:
+            self.symtab.lookup(node.element_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+        return None
 
     def visit_OptionalCheck(self, node):
         try:

@@ -420,4 +420,30 @@ class GetEnvVar(ASTNode):
         super().__init__()
         self.name = name
 
+# --- Phase XII: UI Framework ---
+class UICreateElement(ASTNode):
+    def __init__(self, element_type, name):
+        super().__init__()
+        self.element_type = element_type # 'button', 'text', 'input', 'box'
+        self.name = name
+
+class UISetProperty(ASTNode):
+    def __init__(self, element_name, property_name, value):
+        super().__init__()
+        self.element_name = element_name
+        self.property_name = property_name # 'text', 'color'
+        self.value = value
+
+class UIEventHandler(ASTNode):
+    def __init__(self, element_name, event_type, body):
+        super().__init__()
+        self.element_name = element_name
+        self.event_type = event_type # 'clicked', 'hovered', 'changed'
+        self.body = body
+
+class UIAddToScreen(ASTNode):
+    def __init__(self, element_name):
+        super().__init__()
+        self.element_name = element_name
+
 

@@ -1,0 +1,14 @@
+the number count is 0.
+
+create a text called display.
+set display's text to "Count: 0".
+
+create a button called plus_button.
+set plus_button's text to "Increment".
+
+when plus_button is clicked:
+    add 1 to count.
+    set display's text to "Count: " and count.
+
+add display to the screen.
+add plus_button to the screen.

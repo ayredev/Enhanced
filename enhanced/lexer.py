@@ -13,10 +13,10 @@ class Token:
         return self.type == other.type and self.value == other.value
 
 class Lexer:
-    KEYWORDS = {"a", "an", "the", "for", "each", "in", "if", "greater", "than", "first", "last", "current", "null", "new", "still", "valid", "as", "define", "otherwise", "one", "equal", "or", "not", "when", "someone", "before", "after", "every", "where", "auto", "json", "all"}
+    KEYWORDS = {"a", "an", "the", "for", "each", "in", "if", "greater", "than", "first", "last", "current", "null", "new", "still", "valid", "as", "define", "otherwise", "one", "equal", "or", "not", "when", "someone", "before", "after", "every", "where", "auto", "json", "all", "clicked", "hovered", "changed"}
     CONNECTORS = {"and", "then", "with", "to", "from", "of", "by", "through", "on"}
     VERBS = {"say", "create", "add", "set", "subtract", "is", "called", "read", "write", "append", "multiply", "divide", "divided", "remove", "sort", "wait", "get", "load", "call", "check", "exists", "open", "close", "send", "free", "give", "back", "has", "start", "stop", "gets", "posts", "puts", "deletes", "parse", "serialize", "run", "ask", "update"}
-    NOUNS = {"number", "text", "list", "names", "result", "file", "remainder", "absolute", "value", "power", "size", "item", "seconds", "timestamp", "url", "response", "body", "library", "person", "user", "connection", "truth", "map", "optional", "server", "port", "request", "param", "database", "table", "environment", "variable", "header", "query"}
+    NOUNS = {"number", "text", "list", "names", "result", "file", "remainder", "absolute", "value", "power", "size", "item", "seconds", "timestamp", "url", "response", "body", "library", "person", "user", "connection", "truth", "map", "optional", "server", "port", "request", "param", "database", "table", "environment", "variable", "header", "query", "button", "input", "box", "screen"}
 
     def __init__(self, text):
         self.text = text
@@ -39,11 +39,6 @@ class Lexer:
 
             if char in {'.', ',', ':'}:
                 tokens.append(Token("PUNCTUATION", char, self.line))
-                self.pos += 1
-                continue
-
-            if char in {'[', ']'}:
-                tokens.append(Token("BRACKET", char, self.line))
                 self.pos += 1
                 continue
 

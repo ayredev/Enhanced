@@ -16,6 +16,12 @@ class WasmGenerator(IRGenerator):
         self.output_lines.append("declare void @enhanced_print_int(i32)")
         self.output_lines.append("declare void @enhanced_print_bool(i32)")
         
+        # UI Imports
+        self.output_lines.append("declare i32 @enhanced_ui_create_element(i8*)")
+        self.output_lines.append("declare void @enhanced_ui_set_property(i32, i8*, i8*)")
+        self.output_lines.append("declare void @enhanced_ui_add_to_screen(i32)")
+        self.output_lines.append("declare void @enhanced_ui_set_event_handler(i32, i8*, void()*)")
+
         # Memory Safety Declarations (WASM compatible)
         self.output_lines.append("declare {i64, i64} @enhanced_alloc(i64)")
         self.output_lines.append("declare void @enhanced_free({i64, i64})")
@@ -67,3 +73,76 @@ class WasmGenerator(IRGenerator):
                 val = self.visit(node.value, out)
                 out.append(f"call void @enhanced_print_int(i32 {val})")
         return ""
+
+    def visit_UICreateElement(self, node, out):
+        type_str = node.element_type
+        str_id = f"str_{self.var_count}"
+        self.var_count += 1
+        self.string_constants[str_id] = type_str
+        val_len = len(type_str) + 1
+        
+        reg = self.get_var()
+        out.append(f"{reg} = call i32 @enhanced_ui_create_element(i8* getelementptr inbounds ([{val_len} x i8], [{val_len} x i8]* @{str_id}, i32 0, i32 0))")
+        out.append(f"%{node.name} = alloca i32")
+        out.append(f"store i32 {reg}, i32* %{node.name}")
+        return reg
+
+    def visit_UISetProperty(self, node, out):
+        elem_reg = self.get_var()
+        out.append(f"{elem_reg} = load i32, i32* %{node.element_name}")
+        
+        prop_str = node.property_name
+        prop_id = f"str_{self.var_count}"
+        self.var_count += 1
+        self.string_constants[prop_id] = prop_str
+        prop_len = len(prop_str) + 1
+        
+        val_arg = self._eval_arg(node.value, out, 'i8*')
+        
+        out.append(f"call void @enhanced_ui_set_property(i32 {elem_reg}, i8* getelementptr inbounds ([{prop_len} x i8], [{prop_len} x i8]* @{prop_id}, i32 0, i32 0), i8* {val_arg})")
+
+    def visit_UIAddToScreen(self, node, out):
+        elem_reg = self.get_var()
+        out.append(f"{elem_reg} = load i32, i32* %{node.element_name}")
+        out.append(f"call void @enhanced_ui_add_to_screen(i32 {elem_reg})")
+
+    def visit_UIEventHandler(self, node, out):
+        handler_name = f"handler_{node.element_name}_{node.event_type}_{self.block_count}"
+        self.block_count += 1
+        
+        # Define handler function
+        handler_lines = [f"define void @{handler_name}() {{", "entry:"]
+        for stmt in node.body:
+            self.visit(stmt, handler_lines)
+        handler_lines.append("    ret void")
+        handler_lines.append("}")
+        self.global_lines.extend(handler_lines)
+        
+        # Register handler
+        elem_reg = self.get_var()
+        out.append(f"{elem_reg} = load i32, i32* %{node.element_name}")
+        
+        event_str = node.event_type
+        event_id = f"str_{self.var_count}"
+        self.var_count += 1
+        self.string_constants[event_id] = event_str
+        event_len = len(event_str) + 1
+        
+        out.append(f"call void @enhanced_ui_set_event_handler(i32 {elem_reg}, i8* getelementptr inbounds ([{event_len} x i8], [{event_len} x i8]* @{event_id}, i32 0, i32 0), void()* @{handler_name})")
+
+    def visit_MapGet(self, node, out):
+        out.append(f"; MapGet {node.map_name}")
+        key_arg = self._eval_arg(node.key, out, 'i8*')
+        map_reg = self.get_var()
+        out.append(f"{map_reg} = load i8*, i8** %{node.map_name}")
+        res_reg = self.get_var()
+        out.append(f"{res_reg} = call i8* @enhanced_map_get(i8* {map_reg}, i8* {key_arg})")
+        return res_reg
+
+    def visit_MapSet(self, node, out):
+        out.append(f"; MapSet {node.map_name}")
+        key_arg = self._eval_arg(node.key, out, 'i8*')
+        val_arg = self._eval_arg(node.value, out, 'i8*')
+        map_reg = self.get_var()
+        out.append(f"{map_reg} = load i8*, i8** %{node.map_name}")
+        out.append(f"call void @enhanced_map_set(i8* {map_reg}, i8* {key_arg}, i8* {val_arg})")

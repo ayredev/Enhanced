@@ -105,8 +105,13 @@ class Parser:
         if tok.type == "CONNECTOR" and tok.value == "to":
             return self._parse_method_def()
 
-        if self.match_val("VERB", "say"):
+        elif self.match_val("VERB", "say"):
+            # say [key] in [map].
             expr = self.parse_expression()
+            if self.match_val("KEYWORD", "in"):
+                map_expr = self.parse_expression()
+                map_name = map_expr.name if isinstance(map_expr, Identifier) else "unknown"
+                return PrintStatement(MapGet(map_name, expr))
             return PrintStatement(expr)
 
         elif self.match_val("KEYWORD", "the"):
@@ -118,6 +123,14 @@ class Parser:
                 right = self.parse_expression()
                 return BinaryOp("+", left, right)
             elif self.match_val("CONNECTOR", "to"):
+                # Check for "the screen"
+                if self.peek() and self.peek().value == "the":
+                    self.consume()
+                    self.expect_val("NOUN", "screen", "Expected 'screen'")
+                    if not isinstance(left, Identifier):
+                        raise ParserError("Expected UI element name")
+                    return UIAddToScreen(left.name)
+                
                 list_name = self.expect_type("IDENTIFIER", "Expected list name after 'to'")
                 return ListAppend(Identifier(list_name.value), left)
             else:
@@ -141,10 +154,45 @@ class Parser:
             return self._parse_if()
 
         elif self.match_val("VERB", "create"):
-            return self._parse_create()
+            # UI Element: create a [UI_ELEMENT] called [NAME].
+            # Element Types: button, text, input, box
+            article = self.expect_type("KEYWORD", "Expected article after 'create'")
+            if article.value not in ("a", "an"):
+                raise ParserError(f"Expected 'a' or 'an', got {article.value}")
+            
+            ui_types = ["button", "text", "input", "box"]
+            if self.peek() and self.peek().value in ui_types:
+                ui_type = self.consume().value
+                self.expect_val("VERB", "called", "Expected 'called'")
+                name_tok = self.expect_type("IDENTIFIER", "Expected element name")
+                return UICreateElement(ui_type, name_tok.value)
+
+            return self._parse_create_legacy(article)
 
         elif self.match_val("VERB", "set"):
-            return self._parse_set()
+            # UI: set [NAME]'s [PROPERTY] to [VALUE].
+            # Map: set [value] in [map] to [key] or set [key] in [map] to [value].
+            
+            # Look ahead for possessive (UI)
+            if self.peek() and self.peek().type == "IDENTIFIER" and self.peek_at(1) and self.peek_at(1).type == "POSSESSIVE":
+                name_tok = self.consume()
+                self.consume() # consume 's
+                prop_tok = self.consume()
+                self.expect_val("CONNECTOR", "to", "Expected 'to'")
+                val = self.parse_expression()
+                return UISetProperty(name_tok.value, prop_tok.value, val)
+
+            # Map or legacy set
+            val_or_key = self.parse_expression()
+            if self.match_val("KEYWORD", "in"):
+                map_expr = self.parse_expression()
+                map_name = map_expr.name if isinstance(map_expr, Identifier) else "unknown"
+                self.expect_val("CONNECTOR", "to", "Expected 'to'")
+                key_or_val = self.parse_expression()
+                return MapSet(map_name, key_or_val, val_or_key) # MapSet(map_name, key, value)
+            
+            # Legacy set (e.g. for struct fields)
+            return self._parse_set_legacy(val_or_key)
 
         elif self.match_val("VERB", "read"):
             return self._parse_read()
@@ -271,16 +319,28 @@ class Parser:
             return ServerStart(port)
 
         elif self.match_val("KEYWORD", "when"):
-            self.expect_val("KEYWORD", "someone", "Expected 'someone'")
-            method_tok = self.consume()
-            if method_tok.value not in ["gets", "posts", "puts", "deletes"]:
-                raise ParserError("Expected 'gets', 'posts', 'puts', or 'deletes'")
-            method = method_tok.value.upper()[:-1] # GETS -> GET
-            path = self.parse_expression()
-            self.expect_val("PUNCTUATION", ":", "Expected ':' after route path")
-            body = self._parse_block()
-            from ast_nodes import RouteHandler
-            return RouteHandler(method, path, body)
+            # UI Event: when [NAME] is [EVENT]:
+            # Back-compat: when someone [verb] [path]:
+            if self.peek() and self.peek().value == "someone":
+                self.consume()
+                method_tok = self.consume()
+                if method_tok.value not in ["gets", "posts", "puts", "deletes"]:
+                    raise ParserError("Expected 'gets', 'posts', 'puts', or 'deletes'")
+                method = method_tok.value.upper()[:-1] # GETS -> GET
+                path = self.parse_expression()
+                self.expect_val("PUNCTUATION", ":", "Expected ':' after route path")
+                body = self._parse_block()
+                from ast_nodes import RouteHandler
+                return RouteHandler(method, path, body)
+            else:
+                element_name = self.expect_type("IDENTIFIER", "Expected UI element name").value
+                self.expect_val("VERB", "is", "Expected 'is' after UI element name")
+                event_tok = self.consume()
+                if event_tok.value not in ["clicked", "hovered", "changed"]:
+                    raise ParserError("Expected 'clicked', 'hovered', or 'changed'")
+                self.expect_val("PUNCTUATION", ":", "Expected ':'")
+                body = self._parse_block()
+                return UIEventHandler(element_name, event_tok.value, body)
 
         elif self.match_val("VERB", "send"):
             is_json = False
@@ -773,12 +833,8 @@ class Parser:
         body_stmt = self.parse_statement()
         return IfStatement(left, [body_stmt])
 
-    def _parse_create(self):
-        """Parse 'create' statements: list, map, heap alloc, struct init."""
-        article = self.expect_type("KEYWORD", "Expected article after 'create'")
-        if article.value not in ("a", "an"):
-            raise ParserError(f"Expected 'a' or 'an', got {article.value}")
-
+    def _parse_create_legacy(self, article):
+        """Parse legacy 'create' statements (list, map, heap alloc, struct init)."""
         # 'create a new <type> called <name>' → StructInit or HeapAlloc
         if self.match_val("KEYWORD", "new"):
             type_tok = self.peek()
@@ -834,55 +890,29 @@ class Parser:
         name_tok = self.expect_type("IDENTIFIER", "Expected map name")
         return MapDecl(name_tok.value, key_type, val_type)
 
-    def _parse_set(self):
-        """Parse 'set' statements: field set, map set, or general variable set."""
-        first = self.peek()
-
-        # 'set scores["Alice"] to 100' → MapSet
-        if first and first.type == "IDENTIFIER":
-            saved_pos = self.pos
-            self.consume()
-            if self.match_val("BRACKET", "["):
-                key = self.parse_expression()
-                self.expect_val("BRACKET", "]", "Expected ']'")
-                self.expect_val("CONNECTOR", "to", "Expected 'to'")
-                val = self.parse_expression()
-                return MapSet(first.value, key, val)
-            self.pos = saved_pos
-
-        # 'set alice's name to "Alice"' → FieldSet (possessive)
-        if first and first.type == "IDENTIFIER":
-            saved_pos = self.pos
-            self.consume()
-            if self.peek() and self.peek().type == "POSSESSIVE":
-                self.consume()  # consume 's
-                field_path = []
-                field_tok = self.peek()
-                if field_tok:
-                    self.consume()
-                    field_path.append(field_tok.value)
-                while self.peek() and self.peek().type == "POSSESSIVE":
-                    self.consume()
-                    f = self.peek()
-                    if f:
-                        self.consume()
-                        field_path.append(f.value)
-                self.expect_val("CONNECTOR", "to", "Expected 'to'")
-                val = self.parse_expression()
-                return FieldSet(first.value, field_path, val)
-            # 'set X to Y' — direct identifier assignment (optionals, reassignment)
-            if self.match_val("CONNECTOR", "to"):
-                val = self.parse_expression()
-                return VarDecl("any", Identifier(first.value), val)
-            self.pos = saved_pos
-
-        # 'set the <var> to <val>' → VarDecl
-        self.expect_val("KEYWORD", "the", "Expected 'the'")
-        var_parts = []
-        while self.peek() and self.peek().value != "to":
-            var_parts.append(self.consume().value)
-        self.expect_val("CONNECTOR", "to", "Expected 'to'")
-        val = self.parse_expression()
+    def _parse_set_legacy(self, first_expr):
+        """Handle legacy set patterns for compatibility."""
+        # Check for possessive: set alice's name to "Alice"
+        if isinstance(first_expr, Identifier) and self.peek() and self.peek().type == "POSSESSIVE":
+            self.consume() # consume 's
+            field_name_tok = self.expect_type("IDENTIFIER", "Expected field name")
+            field_path = [field_name_tok.value]
+            while self.peek() and self.peek().type == "POSSESSIVE":
+                self.consume()
+                next_field_tok = self.expect_type("IDENTIFIER", "Expected field name")
+                field_path.append(next_field_tok.value)
+            self.expect_val("CONNECTOR", "to", "Expected 'to'")
+            val = self.parse_expression()
+            return FieldSet(first_expr.name, field_path, val)
+        
+        # Simple variable update: set X to 10.
+        if isinstance(first_expr, Identifier):
+            self.expect_val("CONNECTOR", "to", "Expected 'to'")
+            val = self.parse_expression()
+            # We map this to VarDecl with 'any' type to represent reassignment
+            return VarDecl("any", first_expr, val)
+            
+        raise ParserError(f"Unexpected expression after 'set'")
         var_name = "_".join(var_parts)
         return VarDecl("any", Identifier(var_name), val)
 
@@ -943,6 +973,15 @@ class Parser:
         if expr:
             expr.line = line
 
+        # [expression] in [expression]
+        if self.match_val("KEYWORD", "in"):
+            collection = self._parse_primary()
+            if isinstance(collection, Identifier):
+                expr = MapGet(collection.name, expr)
+            else:
+                expr = ListContains(collection, expr)
+            expr.line = line
+
         while self.peek() and self.peek().type == "CONNECTOR" and self.peek().value == "to":
             if self.pos + 3 < len(self.tokens) and \
                self.tokens[self.pos+1].value == "the" and \
@@ -959,7 +998,13 @@ class Parser:
                 break
         return expr
 
+        # generic [expression] in [expression] as a primary access pattern
+        return self._parse_primary_inner()
+
     def _parse_primary(self):
+        return self._parse_primary_inner()
+
+    def _parse_primary_inner(self):
         tok = self.peek()
         if not tok:
             raise ParserError("Expected expression but found end of file")
@@ -1028,13 +1073,6 @@ class Parser:
                         self.consume()
                         field_path.append(f2.value)
                 return FieldGet(tok.value, field_path)
-
-            # Check for map access: scores["Alice"]
-            if self.peek() and self.peek().type == "BRACKET" and self.peek().value == "[":
-                self.consume()
-                key = self.parse_expression()
-                self.expect_val("BRACKET", "]", "Expected ']'")
-                return MapGet(tok.value, key)
 
             return Identifier(tok.value)
 
