@@ -5,7 +5,7 @@ class WasmGenerator(IRGenerator):
     def __init__(self):
         super().__init__()
 
-    def generate(self, ast):
+    def generate(self, ast, emit_main=True):
         self.output_lines.append("; LLVM IR for Enhanced Language (WebAssembly Target)")
         self.output_lines.append("target datalayout = \"e-m:e-p:32:32-i64:64-n32:64-S128\"")
         self.output_lines.append("target triple = \"wasm32-unknown-unknown\"")
@@ -39,11 +39,12 @@ class WasmGenerator(IRGenerator):
             
         self.output_lines.extend(self.global_lines)
 
-        self.output_lines.append("\ndefine i32 @main() {")
-        self.output_lines.append("entry:")
-        self.output_lines.extend(["    " + line for line in main_body])
-        self.output_lines.append("    ret i32 0")
-        self.output_lines.append("}")
+        if emit_main:
+            self.output_lines.append("\ndefine i32 @main() {")
+            self.output_lines.append("entry:")
+            self.output_lines.extend(["    " + line for line in main_body])
+            self.output_lines.append("    ret i32 0")
+            self.output_lines.append("}")
         return "\n".join(self.output_lines)
 
     def visit_PrintStatement(self, node, out):

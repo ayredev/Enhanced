@@ -446,43 +446,11 @@ class Parser:
             from ast_nodes import Middleware
             return Middleware('after', body)
 
-        # --- v2: method call pattern: <method_name> <object> ---
-        # Handled as identifiers that could be method calls in analyzer
-        # Fall through to identifier handling
+        # Top-level expression or function call (like math_lib's add...)
+        if tok.type in ("IDENTIFIER", "POSSESSIVE"):
+            return self.parse_expression()
 
         raise ParserError(f"I don\'t understand \'{tok.value}\' \u2014 did you mean something else?")
-    def _parse_use(self):
-        self.expect_val("KEYWORD", "the", "Expected 'the' after 'use'")
-        # It could be use the "pkg" package or use the "mod" from the "pkg" package
-        name_tok = self.expect_type("LITERAL_STRING", "Expected package or module name")
-        name1 = name_tok.value
-        
-        module_name = None
-        package_name = None
-        version = None
-        source = None
-
-        if self.match_val("KEYWORD", "package"):
-            package_name = name1
-            if self.match_val("KEYWORD", "version"):
-                version = self.expect_type("LITERAL_STRING", "Expected version string").value
-            if self.match_val("CONNECTOR", "from"):
-                source = self.expect_type("LITERAL_STRING", "Expected source string").value
-        elif self.match_val("CONNECTOR", "from"):
-            module_name = name1
-            self.expect_val("KEYWORD", "the", "Expected 'the' after 'from'")
-            package_name = self.expect_type("LITERAL_STRING", "Expected package name").value
-            self.expect_val("KEYWORD", "package", "Expected 'package' after package name")
-            if self.match_val("KEYWORD", "version"):
-                version = self.expect_type("LITERAL_STRING", "Expected version string").value
-            if self.match_val("CONNECTOR", "from"):
-                source = self.expect_type("LITERAL_STRING", "Expected source string").value
-        else:
-            raise ParserError("Expected 'package' or 'from' after 'use the [name]'")
-        
-        from ast_nodes import UsePackage
-        return UsePackage(package_name, module_name, version, source)
-
     def _parse_get_package(self):
         # enhc get the [name] package
         # Actually the prompt says "enhc get the [name] package" but this is for CLI.
@@ -675,6 +643,7 @@ class Parser:
 
     def _parse_use(self):
         self.expect_val("KEYWORD", "the", "Expected 'the' after 'use'")
+        # It could be use the "pkg" package or use the "mod" from the "pkg" package
         name_tok = self.expect_type("LITERAL_STRING", "Expected package or module name")
         name1 = name_tok.value
         
@@ -712,44 +681,37 @@ class Parser:
         return UsePackage(package_name, module_name, version, source)
 
     def _parse_method_def(self):
-        """Parse 'to <verb> a <type>:' method definition."""
+        """Parse 'to <verb> <params>:' method definition."""
         self.consume()  # consume 'to'
-        # Collect method name words until 'a' or 'an'
         method_words = []
-        while self.peek() and self.peek().value not in ("a", "an"):
-            tok_word = self.consume()
-            # Stop before 'a'/'an' article but also handle 'of' before article
-            if tok_word.value == "of" and self.peek() and self.peek().value in ("a", "an"):
-                break
-            method_words.append(tok_word.value)
+        while self.peek() and self.peek().value not in ("a", "an") and self.peek().type != "NOUN":
+            method_words.append(self.consume().value)
         method_name = " ".join(method_words)
 
-        article = self.expect_type("KEYWORD", "Expected article in method definition")
-        type_tok = self.peek()
-        if not type_tok:
-            raise ParserError("Expected type name in method definition")
-        self.consume()
-        target_type = type_tok.value
-        self.match_val("PUNCTUATION", ":")
-
-        # Parse body statements until blank line or next top-level statement
-        body = []
-        while self.peek():
-            # Stop at next 'define', or another 'to' at start
-            nxt = self.peek()
-            if nxt and nxt.value in ("define",) and nxt.type == "KEYWORD":
-                break
-            if nxt and nxt.value == "to" and nxt.type == "CONNECTOR":
-                # Check if this is a new method def
-                if self.peek_at(1) and self.peek_at(1).type in ("VERB", "IDENTIFIER"):
-                    break
-            stmt = self.parse_statement()
-            if stmt:
-                body.append(stmt)
-            while self.match_val("PUNCTUATION", ".") or self.match_val("CONNECTOR", "then"):
+        params = []
+        # Support parameters: 'a number x, a number y' or 'number x, number y'
+        while self.peek() and self.peek().value != ":":
+            if self.peek().value in ("a", "an"):
+                self.consume()
+            p_type_tok = self.peek()
+            if not p_type_tok: break
+            self.consume()
+            p_name_tok = self.peek()
+            if not p_name_tok or p_name_tok.type != "IDENTIFIER": break
+            self.consume()
+            
+            type_map = {"number": "int", "text": "str", "truth": "bool"}
+            p_type = type_map.get(p_type_tok.value, p_type_tok.value)
+            params.append({'name': p_name_tok.value, 'type': p_type})
+            
+            if self.match_val("PUNCTUATION", ",") or self.match_val("CONNECTOR", "and"):
                 pass
-
-        return MethodDef(target_type, method_name, [], None, body)
+            else:
+                break
+        
+        self.match_val("PUNCTUATION", ":")
+        body = self._parse_block()
+        return MethodDef("global", method_name, params, None, body)
 
     def _parse_the(self):
         """Parse 'the ...' patterns: variable declarations, sizes, optionals, etc."""
@@ -1183,23 +1145,32 @@ class Parser:
     def _parse_primary_inner(self):
         tok = self.peek()
         if not tok:
-            raise ParserError("Expected expression but found end of file")
+            return None
+        line = tok.line
 
         if tok.type == "LITERAL_NUMBER":
             self.consume()
-            return LiteralNumber(int(tok.value))
+            node = LiteralNumber(int(tok.value))
+            node.line = line
+            return node
 
         elif tok.type == "LITERAL_STRING":
             self.consume()
-            return LiteralString(tok.value)
+            node = LiteralString(tok.value)
+            node.line = line
+            return node
 
         elif tok.type == "LITERAL_BOOL":
             self.consume()
-            return LiteralBool(tok.value == "true")
+            node = LiteralBool(tok.value == "true")
+            node.line = line
+            return node
 
         elif tok.type == "LITERAL_NOTHING":
             self.consume()
-            return LiteralBool(None)  # represents 'nothing'
+            node = LiteralBool(None)  # represents 'nothing'
+            node.line = line
+            return node
 
         elif tok.type == "KEYWORD" and tok.value == "the":
             self.consume()
@@ -1223,14 +1194,20 @@ class Parser:
                         if f2:
                             self.consume()
                             field_path.append(f2.value)
-                    return FieldGet(noun.value, field_path)
+                    node = FieldGet(noun.value, field_path)
+                    node.line = line
+                    return node
                 self.pos = saved_pos
             self.consume()  # consume the noun
-            return self._parse_the_expression(noun)
+            node = self._parse_the_expression(noun)
+            node.line = line
+            return node
 
         elif tok.type == "KEYWORD" and tok.value == "null":
             self.consume()
-            return LiteralNumber(0)
+            node = LiteralNumber(0)
+            node.line = line
+            return node
 
         elif tok.type == "IDENTIFIER":
             self.consume()
@@ -1252,21 +1229,31 @@ class Parser:
                 # Namespaced function call: package's function with ...
                 if self.peek() and self.peek().value == "with":
                     args = self._parse_args()
-                    return FunctionCall(FieldGet(tok.value, field_path), args)
+                    node = FunctionCall(FieldGet(tok.value, field_path), args)
+                    node.line = line
+                    return node
                 
-                return FieldGet(tok.value, field_path)
+                node = FieldGet(tok.value, field_path)
+                node.line = line
+                return node
 
             # Function call: function with ...
             if self.peek() and self.peek().value == "with":
                 args = self._parse_args()
-                return FunctionCall(Identifier(tok.value), args)
+                node = FunctionCall(Identifier(tok.value), args)
+                node.line = line
+                return node
 
-            return Identifier(tok.value)
+            node = Identifier(tok.value)
+            node.line = line
+            return node
 
         elif tok.type == "NOUN":
             self.consume()
-            return Identifier(tok.value)
-
+            node = Identifier(tok.value)
+            node.line = line
+            return node
+            
         elif tok.type == "VERB":
             verb_val = tok.value
             self.consume()
@@ -1274,7 +1261,9 @@ class Parser:
             # Function call: verb with ...
             if self.peek() and self.peek().value == "with":
                 args = self._parse_args()
-                return FunctionCall(Identifier(verb_val), args)
+                node = FunctionCall(Identifier(verb_val), args)
+                node.line = line
+                return node
             
             # Legacy method call logic: verb of object
             saved_pos = self.pos - 1 # account for the consumed verb
@@ -1293,6 +1282,8 @@ class Parser:
                 
             self.pos = saved_pos
             self.consume() # consume the verb finally
-            return Identifier(tok.value)
+            node = Identifier(tok.value)
+            node.line = line
+            return node
 
         raise ParserError(f"Expected expression, got {tok.type} '{tok.value}'")

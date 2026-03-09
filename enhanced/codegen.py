@@ -9,7 +9,7 @@ class IRGenerator:
         self.var_count = 0 
         self.block_count = 0
 
-    def generate(self, ast):
+    def generate(self, ast, emit_main=True):
         self.output_lines.append("; LLVM IR for Enhanced Language")
         self.output_lines.append("")
         self.output_lines.append("declare i32 @printf(i8*, ...)")
@@ -67,11 +67,12 @@ class IRGenerator:
             
         self.output_lines.extend(self.global_lines)
 
-        self.output_lines.append("\ndefine i32 @main() {")
-        self.output_lines.append("entry:")
-        self.output_lines.extend(["    " + line for line in main_body])
-        self.output_lines.append("    ret i32 0")
-        self.output_lines.append("}")
+        if emit_main:
+            self.output_lines.append("\ndefine i32 @main() {")
+            self.output_lines.append("entry:")
+            self.output_lines.extend(["    " + line for line in main_body])
+            self.output_lines.append("    ret i32 0")
+            self.output_lines.append("}")
         return "\n".join(self.output_lines)
 
     def get_var(self):
@@ -102,10 +103,8 @@ class IRGenerator:
             else:
                 out.append(f"{reg} = load i8*, i8** %{node.name}")
             return reg
-        elif hasattr(node, 'value_type'):
-            # It's an evaluated sub-expression, we assume the register name was returned by visit
-            reg = self.visit(node, out)
-            return reg
+        elif isinstance(node, (FieldGet, FunctionCall, LiteralBool)):
+            return self.visit(node, out)
         return "0"
 
     def visit_PrintStatement(self, node, out):
@@ -728,6 +727,41 @@ class IRGenerator:
 
     def visit_CleanPackages(self, node, out):
         out.append(f"; CleanPackages")
+
+    def visit_FieldGet(self, node, out):
+        # Package or struct field access
+        target_name = f"{node.object_name}_{node.field_path[0]}"
+        out.append(f"; FieldGet {target_name}")
+        # In a real compiler, we'd load the global variable or call a getter.
+        # For this ecosystem demonstration, we'll assume it's a global i32.
+        res_reg = self.get_var()
+        out.append(f"{res_reg} = load i32, i32* @{target_name}")
+        return res_reg
+
+    def visit_FunctionCall(self, node, out):
+        # 1. Resolve target name
+        if isinstance(node.target, FieldGet):
+            target_name = f"{node.target.object_name}_{node.target.field_path[0]}"
+        else:
+            target_name = node.target.name
+            
+        out.append(f"; FunctionCall {target_name}")
+        
+        # 2. Evaluate arguments
+        arg_regs = []
+        for arg in node.args:
+            reg = self._eval_arg(arg, out, 'i32')
+            arg_regs.append(f"i32 {reg}")
+            
+        # 3. Emit call
+        res_reg = self.get_var()
+        args_str = ", ".join(arg_regs)
+        out.append(f"{res_reg} = call i32 @{target_name}({args_str})")
+        
+        # 4. Store result (simulating 'the result')
+        # We don't always need to store it if it's used as an expression,
+        # but the language has a 'the result' global often.
+        return res_reg
 
 
 # Prepare format strings which might be needed

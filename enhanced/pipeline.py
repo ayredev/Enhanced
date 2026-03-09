@@ -1,5 +1,6 @@
 import os
 import subprocess
+import shutil
 from lexer import Lexer
 from parser import Parser, ParserError
 from analyzer import SemanticAnalyzer, SemanticError
@@ -51,123 +52,143 @@ class Pipeline:
                 elif os.path.exists(local_path):
                     package_paths[pkg_name] = local_path
 
-        basename = os.path.splitext(os.path.basename(source_path))[0]
-        dir_path = os.path.dirname(os.path.abspath(source_path))
-        ll_path = os.path.join(dir_path, f"{basename}.ll")
-
+        # 4. Target Compilation
         try:
-            with open(source_path, 'r', encoding='utf-8') as f:
-                source = f.read()
+            basename = os.path.splitext(os.path.basename(source_path))[0]
+            dir_path = os.path.dirname(os.path.abspath(source_path))
+            ll_path = os.path.join(dir_path, f"{basename}.ll")
             
-            # 1. Lexing
-            lexer = Lexer(source)
-            tokens = lexer.tokenize()
+            # 4.1 Compile Main File IR
+            try:
+                with open(source_path, 'r', encoding='utf-8-sig') as f:
+                    source = f.read()
+            except UnicodeDecodeError:
+                with open(source_path, 'r', encoding='utf-16') as f:
+                    source = f.read()
+            tokens = Lexer(source).tokenize()
+            ast = Parser(tokens).parse()
             
-            # 2. Parsing
-            parser = Parser(tokens)
-            ast = parser.parse()
-            
-            # 3. Type Checking & Semantic Analysis
+            # Semantic Analysis
             analyzer = SemanticAnalyzer()
             self._load_package_symbols(analyzer, package_paths)
-            typed_ast = analyzer.analyze(ast)
-
-            # 3.1 WASM Compatibility Check
+            analyzer.analyze(ast)
+            
+            # Memory Analysis
+            mem_analyzer = MemoryAnalyzer()
+            mem_analyzer.analyze(ast)
+            
+            # Code Generation
             if self.target == "web":
                 compat_checker = WasmCompatibilityChecker()
-                try:
-                    compat_checker.check(typed_ast)
-                except Exception as e:
-                    raise PipelineError(f"Compatibility Error: {str(e)}")
-            
-            # 3.5. Memory Safety Analysis
-            mem_analyzer = MemoryAnalyzer()
-            typed_ast = mem_analyzer.analyze(typed_ast, analyzer.symtab)
-            
-            # 4. IR Generation
-            if self.target == "web":
-                generator = WasmGenerator()
+                compat_checker.check(ast)
+                ir = WasmGenerator().generate(ast)
             else:
-                generator = IRGenerator()
-            ir_str = generator.generate(typed_ast)
-            
+                ir = IRGenerator().generate(ast)
+                
             with open(ll_path, 'w', encoding='utf-8') as f:
-                f.write(ir_str)
+                f.write(ir)
+
+            # 4.2 Clang Discovery
+            clang_cmd = "clang"
+            if not shutil.which("clang") and os.name == 'nt':
+                alt_path = r"C:\Program Files\LLVM\bin\clang.exe"
+                if os.path.exists(alt_path): clang_cmd = alt_path
+
+            # 4.3 Package Compilation
+            package_objs = []
+            for pkg_name, pkg_path in package_paths.items():
+                for root, _, files in os.walk(pkg_path):
+                    for file in files:
+                        if file.endswith(".en") and file != 'manifest.en':
+                            pkg_src = os.path.join(root, file)
+                            p_base = os.path.splitext(file)[0]
+                            p_ll = os.path.join(dir_path, f"pkg_{pkg_name}_{p_base}.ll")
+                            p_obj = os.path.join(dir_path, f"pkg_{pkg_name}_{p_base}.o")
+                            
+                            try:
+                                try:
+                                    with open(pkg_src, 'r', encoding='utf-8-sig') as f:
+                                        p_src = f.read()
+                                except UnicodeDecodeError:
+                                    with open(pkg_src, 'r', encoding='utf-16') as f:
+                                        p_src = f.read()
+                                p_toks = Lexer(p_src).tokenize()
+                                p_ast = Parser(p_toks).parse()
+                                
+                                if self.target == "web":
+                                    p_ir = WasmGenerator().generate(p_ast, emit_main=False)
+                                    c_args = ["--target=wasm32", "-nostdlib", "-c"]
+                                else:
+                                    p_ir = IRGenerator().generate(p_ast, emit_main=False)
+                                    c_args = ["-c"]
+                                    
+                                with open(p_ll, 'w', encoding='utf-8') as f: f.write(p_ir)
+                                subprocess.run([clang_cmd] + c_args + [p_ll, "-o", p_obj], check=True, capture_output=True, text=True)
+                                package_objs.append(p_obj)
+                            except Exception as e:
+                                print(f"[Warning] Failed to compile package file {pkg_src}: {e}")
+
+            stats = {
+                "tokens": len(tokens),
+                "statements": len(ast.statements),
+                "ll_path": ll_path,
+                "package_files": len(package_objs)
+            }
 
             if self.target == "web":
-                # WASM Pipeline
+                # WASM Link
                 wasm_path = os.path.join(dir_path, f"{basename}.wasm")
                 html_path = os.path.join(dir_path, f"{basename}.html")
+                runtime_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime")
+                stdlib_wasm_c = os.path.join(runtime_dir, "enhanced_wasm_stdlib.c")
                 
-                # We compile LLVM IR to WASM using clang --target=wasm32
-                try:
-                    # Note: We don't link with a separate runtime .o for WASM yet, 
-                    # we just compile the .ll. If needed we could include enhanced_wasm_stdlib.c
-                    stdlib_c_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime", "enhanced_wasm_stdlib.c")
-                    cmd = [
-                        "clang",
-                        "--target=wasm32",
-                        "-nostdlib",
-                        "-Wl,--no-entry",
-                        "-Wl,--export-all",
-                        "-o", wasm_path,
-                        ll_path
-                    ]
-                    # If stdlib is needed, we'd add it here, but for now we export main from .ll
-                    subprocess.run(cmd, check=True, capture_output=True, text=True)
-                except FileNotFoundError:
-                    raise PipelineError("I couldn't find 'clang' installed on your system.")
-                except subprocess.CalledProcessError as e:
-                    raise PipelineError(f"WASM Compilation Error: {e.stderr}")
-
-                # Generate HTML shell
+                cmd = [
+                    clang_cmd, "--target=wasm32", "-nostdlib",
+                    "-Wl,--no-entry", "-Wl,--export-all", "-Wl,--allow-undefined",
+                    "-o", wasm_path, ll_path, stdlib_wasm_c
+                ] + package_objs
+                
+                subprocess.run(cmd, check=True, capture_output=True, text=True)
                 self.generate_html_shell(html_path, f"{basename}.wasm", basename)
-
-                if not self.keep_ll:
-                    if os.path.exists(ll_path): os.remove(ll_path)
-
-                return html_path, {
-                    "tokens": len(tokens),
-                    "statements": len(ast.statements),
-                    "ll_path": ll_path,
-                    "obj_path": wasm_path, # using obj_path to store wasm_path for stats
-                    "exe_path": html_path
-                }
+                
+                stats.update({"obj_path": wasm_path, "exe_path": html_path})
+                return html_path, stats
 
             else:
-                # 5. Native Compilation
+                # Native Link
                 obj_path = os.path.join(dir_path, f"{basename}.o")
                 exe_name = f"{basename}.exe" if os.name == 'nt' else basename
                 exe_path = os.path.join(dir_path, exe_name)
                 
-                try:
-                    subprocess.run(["clang", "-c", ll_path, "-o", obj_path], check=True, capture_output=True, text=True)
-                except FileNotFoundError:
-                     raise PipelineError("I couldn't find 'clang' installed on your system.")
-                except subprocess.CalledProcessError as e:
-                     raise PipelineError(f"Native Compilation Error: {e.stderr}")
+                subprocess.run([clang_cmd, "-c", ll_path, "-o", obj_path], check=True, capture_output=True, text=True)
                 
-                # 6. Linking
-                runtime_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime", "enhanced_runtime.o")
-                stdlib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime", "enhanced_stdlib.o")
-                memory_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime", "enhanced_memory.o")
+                runtime_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime")
+                runtime_objs = [
+                    os.path.join(runtime_dir, "enhanced_runtime.o"),
+                    os.path.join(runtime_dir, "enhanced_stdlib.o"),
+                    os.path.join(runtime_dir, "enhanced_memory.o")
+                ]
                 
-                try:
-                     subprocess.run(["clang", obj_path, runtime_path, stdlib_path, memory_path, "-o", exe_path], check=True, capture_output=True, text=True)
-                except subprocess.CalledProcessError as e:
-                     raise PipelineError(f"Native Linking Error: {e.stderr}")
+                link_cmd = [clang_cmd, obj_path] + package_objs + runtime_objs + ["-o", exe_path]
+                res = subprocess.run(link_cmd, capture_output=True, text=True)
+                
+                if res.returncode != 0 and os.name == 'nt' and ("libcmt.lib" in res.stderr or "msvcrt.lib" in res.stderr):
+                    # Fallback for missing Windows SDK
+                    fallback = link_cmd + ["-Wl,/nodefaultlib:libcmt", "-lmsvcrt"]
+                    res = subprocess.run(fallback, capture_output=True, text=True)
+                
+                if res.returncode != 0:
+                    raise PipelineError(f"Native Linking Error: {res.stderr}")
                 
                 if not self.keep_ll:
                     if os.path.exists(ll_path): os.remove(ll_path)
                     if os.path.exists(obj_path): os.remove(obj_path)
-                    
-                stats = {
-                    "tokens": len(tokens),
-                    "statements": len(ast.statements),
-                    "ll_path": ll_path,
-                    "obj_path": obj_path,
-                    "exe_path": exe_path
-                }
+                    for p_obj in package_objs:
+                        if os.path.exists(p_obj): os.remove(p_obj)
+                        p_ll = p_obj.replace(".o", ".ll")
+                        if os.path.exists(p_ll): os.remove(p_ll)
+
+                stats.update({"obj_path": obj_path, "exe_path": exe_path})
                 return exe_path, stats
             
         except (ParserError, SemanticError, MemoryAnalysisError) as e:

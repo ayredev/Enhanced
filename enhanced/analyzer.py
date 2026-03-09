@@ -14,7 +14,6 @@ class SemanticAnalyzer:
         self.enum_registry = EnumRegistry()
         self.package_registry = {} # package_name -> { symbol_name -> symbol_info }
         self.methods = {}  # "type.method_name" -> MethodDef node
-
     def register_package_symbols(self, pkg_name, symbols):
         """Register symbols for a package manually (used by Pipeline)."""
         if pkg_name not in self.package_registry:
@@ -728,6 +727,43 @@ class SemanticAnalyzer:
     def visit_GetEnvVar(self, node):
         node.value_type = TypeSystem.STR
         return TypeSystem.STR
+
+    def visit_FunctionCall(self, node):
+        # Analyze arguments
+        for arg in node.args:
+            self.visit(arg)
+            
+        # Resolve target and return type
+        if isinstance(node.target, FieldGet):
+            ret_type = self.visit(node.target)
+            node.value_type = ret_type
+            self.symtab.define("result", ret_type, getattr(node, 'line', 0))
+            return ret_type
+        elif isinstance(node.target, Identifier):
+            try:
+                sym = self.symtab.lookup(node.target.name, getattr(node, 'line', 0))
+                node.value_type = sym['type']
+                self.symtab.define("result", sym['type'], getattr(node, 'line', 0))
+                return sym['type']
+            except (SymbolTableError, SemanticError):
+                # Default to int for simulated/unknown functions
+                node.value_type = TypeSystem.INT
+                self.symtab.define("result", TypeSystem.INT, getattr(node, 'line', 0))
+                return TypeSystem.INT
+
+    def visit_FieldGet(self, node):
+        pkg_name = node.object_name
+        field_name = node.field_path[0]
+        
+        if pkg_name in self.package_registry:
+            if field_name in self.package_registry[pkg_name]:
+                sym = self.package_registry[pkg_name][field_name]
+                node.value_type = sym['type']
+                return sym['type']
+        
+        # Fallback or error
+        node.value_type = TypeSystem.INT
+        return TypeSystem.INT
 
     def visit_OtherwiseBlock(self, node):
         self.symtab.enter_scope()
