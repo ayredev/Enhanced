@@ -12,7 +12,14 @@ class SemanticAnalyzer:
         self.symtab = SymbolTable()
         self.struct_registry = StructRegistry()
         self.enum_registry = EnumRegistry()
+        self.package_registry = {} # package_name -> { symbol_name -> symbol_info }
         self.methods = {}  # "type.method_name" -> MethodDef node
+
+    def register_package_symbols(self, pkg_name, symbols):
+        """Register symbols for a package manually (used by Pipeline)."""
+        if pkg_name not in self.package_registry:
+            self.package_registry[pkg_name] = {}
+        self.package_registry[pkg_name].update(symbols)
 
     def analyze(self, ast):
         self.visit(ast)
@@ -357,13 +364,63 @@ class SemanticAnalyzer:
                 f"I found a problem on line {node.line}: The field '{node.field_path[-1]}' expects "
                 f"{TypeSystem.noun_for_type(resolved_type)}, but you gave {TypeSystem.noun_for_type(val_type)}.")
 
+    def visit_UIAddToScreen(self, node):
+        try:
+            self.symtab.lookup(node.element_name, node.line)
+        except SymbolTableError as e:
+            raise SemanticError(str(e))
+
+    # --- Phase XIII: Package Manager Visitors ---
+    def visit_UsePackage(self, node):
+        # Record that the package is being used.
+        # In a real compiler, we would load the package's symbols here.
+        # For simulation, we'll add some dummy symbols if the package is "math".
+        pkg_name = node.package_name
+        if pkg_name not in self.package_registry:
+            self.package_registry[pkg_name] = {}
+        
+        # If it's the "math" package, add a dummy "add" function.
+        if pkg_name == "math":
+            self.package_registry[pkg_name]["add"] = {"type": "int", "kind": "function"}
+        
+        # Add the package name to the symbol table as a namespace
+        self.symtab.define(pkg_name, "package", node.line)
+
+    def visit_Manifest(self, node):
+        for dep in node.dependencies:
+            self.visit(dep)
+
+    def visit_GetPackage(self, node):
+        # No semantic analysis needed for CLI commands, just pass
+        pass
+
+    def visit_PublishPackage(self, node):
+        # No semantic analysis needed for CLI commands, just pass
+        pass
+
+    def visit_CleanPackages(self, node):
+        # No semantic analysis needed for CLI commands, just pass
+        pass
+
     def visit_FieldGet(self, node):
-        """Get a field from a struct instance."""
+        """Get a field from a struct instance OR a symbol from a package."""
         try:
             sym = self.symtab.lookup(node.object_name, node.line)
         except SymbolTableError as e:
+            # Maybe the object_name is a package that hasn't been defined?
             raise SemanticError(str(e))
+        
         obj_type = sym['type']
+        
+        # Check if it's a package access
+        if obj_type == "package":
+            pkg_name = node.object_name
+            field_name = node.field_path[0]
+            if pkg_name in self.package_registry and field_name in self.package_registry[pkg_name]:
+                symbol_info = self.package_registry[pkg_name][field_name]
+                node.value_type = symbol_info['type']
+                return symbol_info['type']
+            raise SemanticError(f"I found a problem on line {node.line}: '{field_name}' is not in the '{pkg_name}' package.")
         
         # Support optional unwrapping: 'say nickname's value'
         if obj_type == TypeSystem.OPTIONAL:

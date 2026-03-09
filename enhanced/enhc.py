@@ -17,7 +17,8 @@ VERSION = "0.1.0"
 
 def main():
     parser = argparse.ArgumentParser(description="Enhanced Language Compiler", add_help=False)
-    parser.add_argument("file", nargs="?", help="The .en file to compile")
+    parser.add_argument("command", nargs="?", help="The command to run (get, publish, clean, or file path)")
+    parser.add_argument("extra", nargs="*", help="Extra arguments for the command")
     parser.add_argument("--run", action="store_true", help="Compile and run immediately")
     parser.add_argument("--ir", action="store_true", help="Stop after IR generation and show .ll")
     parser.add_argument("--ast", action="store_true", help="Stop after parsing and show AST JSON")
@@ -37,22 +38,77 @@ def main():
         from lsp.server import LSPServer
         LSPServer().run()
         sys.exit(0)
+
+    if args.command == "get":
+        # enhc get the [name] package
+        if len(args.extra) >= 3 and args.extra[0] == "the" and args.extra[2] == "package":
+            pkg_name = args.extra[1]
+            print(f"→ Getting the '{pkg_name}' package...")
+            # Simulated Registry logic
+            registry_path = os.path.join(os.getcwd(), "Registry")
+            packages_path = os.path.join(os.getcwd(), "enhanced_packages")
+            if not os.path.exists(packages_path):
+                os.makedirs(packages_path)
+            
+            src = os.path.join(registry_path, pkg_name)
+            dst = os.path.join(packages_path, pkg_name)
+            if os.path.exists(src):
+                import shutil
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+                print(f"[OK] Package '{pkg_name}' installed to enhanced_packages/")
+            else:
+                print(f"[Error] Package '{pkg_name}' not found in Registry")
+            sys.exit(0)
+
+    if args.command == "publish":
+        print("→ Publishing package...")
+        # Simulated publish logic: bundle current folder into .enpkg
+        import zipfile
+        pkg_name = "my_package" # Should read from manifest.en
+        if os.path.exists("manifest.en"):
+            with open("manifest.en", "r") as f:
+                for line in f:
+                    if "this is the" in line:
+                        pkg_name = line.split('"')[1]
+                        break
         
-    if args.help or not args.file:
+        with zipfile.ZipFile(f"{pkg_name}.enpkg", 'w') as zipf:
+            for root, dirs, files in os.walk("."):
+                if "enhanced_packages" in root or ".git" in root:
+                    continue
+                for file in files:
+                    if not file.endswith(".enpkg"):
+                        zipf.write(os.path.join(root, file))
+        print(f"[OK] Published as {pkg_name}.enpkg")
+        sys.exit(0)
+
+    if args.command == "clean":
+        print("→ Cleaning enhanced_packages/...")
+        import shutil
+        if os.path.exists("enhanced_packages"):
+            shutil.rmtree("enhanced_packages")
+            print("[OK] Cleaned.")
+        else:
+            print("Nothing to clean.")
+        sys.exit(0)
+        
+    if args.help or not args.command:
         print(f"Enhanced Compiler {VERSION}")
         print("Usage:")
         print("  enhc <file.en>              -> compile and produce executable")
+        print("  enhc get the <pkg> package  -> download a package")
+        print("  enhc publish                -> bundle current package")
+        print("  enhc clean                  -> remove downloaded packages")
         print("  enhc <file.en> --target web -> compile for WebAssembly")
         print("  enhc <file.en> --run        -> compile and immediately run it")
-        print("  enhc <file.en> --ir         -> stop after IR generation, show the .ll file")
-        print("  enhc <file.en> --ast        -> stop after parsing, show the AST JSON")
-        print("  enhc <file.en> --check      -> run semantic analysis only, report errors")
         print("  enhc --lsp                  -> start the Language Server")
         print("  enhc --version              -> print version")
         print("  enhc --help                 -> print this message")
         sys.exit(0)
 
-    source_path = args.file
+    source_path = args.command
     if not os.path.exists(source_path):
         print(f"[Error] I couldn't find the file '{source_path}'")
         sys.exit(1)

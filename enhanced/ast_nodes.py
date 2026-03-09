@@ -446,4 +446,34 @@ class UIAddToScreen(ASTNode):
         super().__init__()
         self.element_name = element_name
 
+# --- Phase XIII: Package Manager ---
+class UsePackage(ASTNode):
+    def __init__(self, package_name, module_name=None, version=None, source=None):
+        super().__init__()
+        self.package_name = package_name
+        self.module_name = module_name
+        self.version = version
+        self.source = source
+
+class Manifest(ASTNode):
+    def __init__(self, package_name, version, author, dependencies):
+        super().__init__()
+        self.package_name = package_name
+        self.version = version
+        self.author = author
+        self.dependencies = dependencies # List of UsePackage nodes
+
+class GetPackage(ASTNode):
+    def __init__(self, package_name):
+        super().__init__()
+        self.package_name = package_name
+
+class PublishPackage(ASTNode):
+    def __init__(self):
+        super().__init__()
+
+class CleanPackages(ASTNode):
+    def __init__(self):
+        super().__init__()
+
 

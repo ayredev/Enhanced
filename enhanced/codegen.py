@@ -709,6 +709,26 @@ class IRGenerator:
         out.append(f"store i8* {reg}, i8** %result")
         return reg
 
+    # --- Phase XIII: Package Manager Visitors ---
+    def visit_UsePackage(self, node, out):
+        out.append(f"; UsePackage {node.package_name}")
+        if node.module_name:
+            out.append(f"; module: {node.module_name}")
+
+    def visit_Manifest(self, node, out):
+        out.append(f"; Manifest for {node.package_name}")
+        for dep in node.dependencies:
+            self.visit(dep, out)
+
+    def visit_GetPackage(self, node, out):
+        out.append(f"; GetPackage {node.package_name}")
+
+    def visit_PublishPackage(self, node, out):
+        out.append(f"; PublishPackage")
+
+    def visit_CleanPackages(self, node, out):
+        out.append(f"; CleanPackages")
+
 
 # Prepare format strings which might be needed
 def init_ir_generator():

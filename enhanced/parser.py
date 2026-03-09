@@ -101,6 +101,22 @@ class Parser:
             body = [self.parse_statement()]
             return OtherwiseBlock(body)
 
+        # --- Phase XIII: use package ---
+        if self.match_val("VERB", "use"):
+            return self._parse_use()
+
+        # --- Phase XIII: enhc get the [name] package ---
+        if self.match_val("VERB", "get"):
+            return self._parse_get_package()
+
+        # --- Phase XIII: enhc publish ---
+        if self.match_val("VERB", "publish"):
+            return self._parse_publish()
+
+        # --- Phase XIII: enhc clean ---
+        if self.match_val("VERB", "clean"):
+            return self._parse_clean()
+
         # --- v2: "to <verb> a <type>:" → method definition ---
         if tok.type == "CONNECTOR" and tok.value == "to":
             return self._parse_method_def()
@@ -434,7 +450,52 @@ class Parser:
         # Handled as identifiers that could be method calls in analyzer
         # Fall through to identifier handling
 
-        raise ParserError(f"I don't understand '{tok.value}' \u2014 did you mean something else?")
+        raise ParserError(f"I don\'t understand \'{tok.value}\' \u2014 did you mean something else?")
+    def _parse_use(self):
+        self.expect_val("KEYWORD", "the", "Expected 'the' after 'use'")
+        package_name = self.expect_type("LITERAL_STRING", "Expected package name").value
+
+        module_name = None
+        version = None
+        source = None
+
+        if self.match_val("KEYWORD", "package"):
+            # use the "package_name" package version "1.0.0"
+            if self.match_val("KEYWORD", "version"):
+                version = self.expect_type("LITERAL_STRING", "Expected version string").value
+            if self.match_val("KEYWORD", "from"):
+                source = self.expect_type("LITERAL_STRING", "Expected source string").value
+        elif self.match_val("KEYWORD", "from"):
+            # use the "module" from the "package" package
+            module_name = package_name # The first string was the module name
+            self.expect_val("KEYWORD", "the", "Expected 'the' after 'from'")
+            package_name = self.expect_type("LITERAL_STRING", "Expected package name").value
+            self.expect_val("KEYWORD", "package", "Expected 'package' after package name")
+            if self.match_val("KEYWORD", "version"):
+                version = self.expect_type("LITERAL_STRING", "Expected version string").value
+            if self.match_val("KEYWORD", "from"):
+                source = self.expect_type("LITERAL_STRING", "Expected source string").value
+        else:
+            raise ParserError("Expected 'package' or 'from' after 'use the [package_name]'")
+        
+        from ast_nodes import UsePackage
+        return UsePackage(package_name, module_name, version, source)
+
+    def _parse_get_package(self):
+        self.expect_val("KEYWORD", "the", "Expected 'the' after 'get'")
+        package_name = self.expect_type("IDENTIFIER", "Expected package name").value
+        self.expect_val("KEYWORD", "package", "Expected 'package' after package name")
+        from ast_nodes import GetPackage
+        return GetPackage(package_name)
+
+    def _parse_publish(self):
+        from ast_nodes import PublishPackage
+        return PublishPackage()
+
+    def _parse_clean(self):
+        from ast_nodes import CleanPackages
+        return CleanPackages()
+
     def _parse_block(self):
         body = []
         while self.peek():
@@ -587,6 +648,44 @@ class Parser:
             variants.append(tok.value)
             self.match_val("PUNCTUATION", ".")
         return variants
+
+    def _parse_use(self):
+        self.expect_val("KEYWORD", "the", "Expected 'the' after 'use'")
+        name_tok = self.expect_type("LITERAL_STRING", "Expected package or module name")
+        name1 = name_tok.value
+        
+        module_name = None
+        package_name = None
+        version = None
+        source = None
+
+        # Case 1: use the "pkg" package ...
+        if self.match_val("KEYWORD", "package"):
+            package_name = name1
+            
+            # Optional version
+            if self.match_val("KEYWORD", "version"):
+                 version = self.expect_type("LITERAL_STRING", "Expected version string").value
+                 
+            # Optional source (from "...")
+            if self.match_val("CONNECTOR", "from"):
+                 source = self.expect_type("LITERAL_STRING", "Expected source string").value
+
+        # Case 2: use the "mod" from the "pkg" package ...
+        elif self.match_val("CONNECTOR", "from"):
+             module_name = name1
+             self.expect_val("KEYWORD", "the", "Expected 'the' after 'from'")
+             package_name = self.expect_type("LITERAL_STRING", "Expected package name").value
+             self.expect_val("KEYWORD", "package", "Expected 'package'")
+             
+             if self.match_val("KEYWORD", "version"):
+                 version = self.expect_type("LITERAL_STRING", "Expected version string").value
+
+        else:
+             raise ParserError("Expected 'package' or 'from' after 'use the \"...\"'")
+             
+        from ast_nodes import UsePackage
+        return UsePackage(package_name, module_name, version, source)
 
     def _parse_method_def(self):
         """Parse 'to <verb> a <type>:' method definition."""
@@ -967,6 +1066,41 @@ class Parser:
         self.expect_val("KEYWORD", "in", "Expected 'in'")
         list_expr = self.parse_expression()
         return ListContains(list_expr, val)
+
+    def parse_manifest(self):
+        """Parse manifest.en file."""
+        package_name = None
+        version = None
+        author = None
+        dependencies = []
+        
+        while self.peek():
+            if self.match_val("KEYWORD", "this"):
+                self.expect_val("VERB", "is", "Expected 'is'")
+                self.expect_val("KEYWORD", "the", "Expected 'the'")
+                package_name = self.expect_type("LITERAL_STRING", "Expected package name").value
+                self.expect_val("KEYWORD", "package", "Expected 'package'")
+            elif self.match_val("KEYWORD", "the"):
+                prop = self.expect_type("KEYWORD", "Expected property name").value
+                self.expect_val("VERB", "is", "Expected 'is'")
+                val = self.expect_type("LITERAL_STRING", f"Expected {prop} value").value
+                if prop == "version":
+                    version = val
+                elif prop == "author":
+                    author = val
+            elif self.match_val("VERB", "use"):
+                dependencies.append(self._parse_use())
+            
+            while self.match_val("PUNCTUATION", "."):
+                pass
+            
+            # Prevent infinite loop if we don't match anything
+            if self.peek() and self.peek().type != "PUNCTUATION": # assuming '.' is the only punctuation we might skip above
+                if not (self.peek().value in ("this", "the", "use")):
+                     tok = self.peek()
+                     raise ParserError(f"Unexpected token in manifest: {tok.type} '{tok.value}' at line {tok.line}")
+
+        return Manifest(package_name, version, author, dependencies)
 
     # ==== Expression Parsing ====
 

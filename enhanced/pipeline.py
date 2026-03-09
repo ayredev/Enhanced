@@ -20,6 +20,37 @@ class Pipeline:
         if not os.path.exists(source_path):
             raise PipelineError(f"I couldn't find the file '{source_path}'")
         
+        # 0. Manifest Check & Dependency Resolution
+        manifest_path = os.path.join(os.path.dirname(os.path.abspath(source_path)), "manifest.en")
+        package_paths = {}
+        
+        if os.path.exists(manifest_path):
+            print(f"→ Reading manifest.en...")
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                m_source = f.read()
+            m_lexer = Lexer(m_source)
+            m_tokens = m_lexer.tokenize()
+            m_parser = Parser(m_tokens)
+            manifest_ast = m_parser.parse_manifest()
+            
+            # Resolve dependencies
+            project_root = os.path.dirname(os.path.abspath(source_path))
+            enhanced_packages_dir = os.path.join(project_root, "enhanced_packages")
+            
+            for dep in manifest_ast.dependencies:
+                pkg_name = dep.package_name
+                pkg_path = os.path.join(enhanced_packages_dir, pkg_name)
+                local_path = os.path.join(project_root, pkg_name)
+
+                if os.path.exists(pkg_path):
+                    package_paths[pkg_name] = pkg_path
+                    print(f"  ✓ Found package '{pkg_name}' in enhanced_packages/")
+                elif os.path.exists(local_path):
+                    package_paths[pkg_name] = local_path
+                    print(f"  ✓ Found local package '{pkg_name}'")
+                else:
+                    print(f"  ⚠ Warning: Package '{pkg_name}' not found.")
+
         basename = os.path.splitext(os.path.basename(source_path))[0]
         dir_path = os.path.dirname(os.path.abspath(source_path))
         ll_path = os.path.join(dir_path, f"{basename}.ll")
@@ -38,6 +69,16 @@ class Pipeline:
             
             # 3. Type Checking & Semantic Analysis
             analyzer = SemanticAnalyzer()
+            
+            # Load package symbols
+            for pkg_name, pkg_path in package_paths.items():
+                print(f"→ Loading symbols from '{pkg_name}'...")
+                try:
+                    symbols = self._load_package_symbols(pkg_path)
+                    analyzer.register_package_symbols(pkg_name, symbols)
+                except Exception as e:
+                    print(f"  ⚠ Failed to load package '{pkg_name}': {str(e)}")
+
             typed_ast = analyzer.analyze(ast)
 
             # 3.1 WASM Compatibility Check
@@ -142,6 +183,29 @@ class Pipeline:
              raise PipelineError(str(e))
         except Exception as e:
              raise PipelineError(f"An unexpected error occurred: {str(e)}")
+
+    def _load_package_symbols(self, pkg_path):
+        # Scan for .en files
+        en_files = [f for f in os.listdir(pkg_path) if f.endswith('.en') and f != 'manifest.en']
+        if not en_files:
+            return {}
+            
+        full_source = ""
+        for f in en_files:
+            with open(os.path.join(pkg_path, f), 'r', encoding='utf-8') as file:
+                full_source += file.read() + "\n"
+        
+        lexer = Lexer(full_source)
+        tokens = lexer.tokenize()
+        parser = Parser(tokens)
+        ast = parser.parse()
+        
+        analyzer = SemanticAnalyzer()
+        analyzer.analyze(ast)
+        
+        symbols = analyzer.symtab.scopes[0]
+        # print(f"    Loaded symbols from {pkg_path}: {list(symbols.keys())}")
+        return symbols
 
     def generate_html_shell(self, path, wasm_filename, title):
         html_content = f"""<!DOCTYPE html>
